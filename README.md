@@ -59,7 +59,7 @@ This creates symlinks in the shared global directory:
 
 | Skill | Description |
 |-------|-------------|
-| `convex_guidelines` | Build, review, and debug Convex backends with guidance for schema, functions, auth, HTTP routes, actions, scheduling, storage, and TypeScript typing. Based off `https://convex.link/convex_rules.txt` |
+| `convex-guidelines` | Build, review, and debug Convex backends with guidance for schema, functions, auth, HTTP routes, actions, scheduling, storage, and TypeScript typing. Based off `https://convex.link/convex_rules.txt` |
 | `plan-reviewer` | Skeptical review of implementation plans/design docs to surface risks, edge cases, and simpler alternatives |
 | `tmux` | Remote-control tmux sessions by sending keystrokes and scraping pane output |
 

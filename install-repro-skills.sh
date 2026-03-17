@@ -10,7 +10,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILLS_BIN="${SKILLS_BIN:-skills}"
-SKILLS_AGENTS="${SKILLS_AGENTS:-codex opencode gemini-cli github-copilot}"
+SKILLS_AGENTS="${SKILLS_AGENTS:-codex opencode gemini-cli github-copilot claude-code}"
 LINK_OPENCLAW_SKILLS="${LINK_OPENCLAW_SKILLS:-0}"
 
 require_cmd() {

@@ -6,6 +6,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILLS_DIR="$SCRIPT_DIR/skills"
 SKILL_TARGET_DIRS=(
     "$HOME/.agents/skills"
+    "$HOME/.claude/skills"
 )
 
 # Create skill directories if they don't exist
