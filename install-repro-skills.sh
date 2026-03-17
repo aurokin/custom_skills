@@ -1,11 +1,5 @@
 #!/usr/bin/env bash
 
-# Reproduce this machine's skill setup on another computer.
-# - Installs upstream global skills via the `skills` CLI
-# - Removes deprecated agent-md-refactor if present
-# - Links local custom skills from this repo into ~/.agents/skills
-# - Optionally links OpenClaw-only skills when explicitly requested
-
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -39,9 +33,6 @@ main() {
 
     echo "Installing to ~/.agents/skills for agents: ${skills_agents[*]}"
 
-    # Replace old AGENTS.md refactor skill with Sentry's agents-md.
-    "$SKILLS_BIN" remove agent-md-refactor -g -y >/dev/null 2>&1 || true
-
     local specs=(
         "anthropics/skills@frontend-design"
         "anthropics/skills@webapp-testing"
@@ -57,17 +48,19 @@ main() {
         "getsentry/skills@agents-md"
         "openai/skills@openai-docs"
         "openai/skills@pdf"
-        "openai/skills@playwright"
         "openai/skills@screenshot"
         "openai/skills@security-best-practices"
         "openai/skills@skill-creator"
         "openai/skills@spreadsheet"
         "steipete/clawdis@github"
+        "steipete/clawdis@tmux"
+        "vercel-labs/agent-browser"
         "vercel-labs/agent-skills@vercel-composition-patterns"
         "vercel-labs/agent-skills@vercel-react-best-practices"
         "vercel-labs/agent-skills@vercel-react-native-skills"
         "vercel-labs/agent-skills@web-design-guidelines"
         "vercel-labs/skills@find-skills"
+        "waynesutton/convexskills"
     )
 
     for spec in "${specs[@]}"; do
