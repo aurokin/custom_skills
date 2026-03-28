@@ -13,17 +13,25 @@ This repo manages a curated set of agent skills (for Claude Code, Codex, OpenCod
 # Link local skills only (no upstream sync)
 ./link-skills.sh
 
+# Refresh the forked agents-md skill from upstream
+bash maintenance/sync-agents-md.sh
+
 # Override which agents get skills (default: codex opencode gemini-cli github-copilot claude-code)
 SKILLS_AGENTS="codex opencode" ./install-repro-skills.sh
 ```
 
-Requires: `skills` CLI and `jq` on PATH.
+Requires: `skills` CLI and `jq` on PATH. Maintenance sync also uses `curl`.
 
 ## Architecture
 
 - `install-repro-skills.sh` — Declarative sync script. The `specs` array is the source of truth for desired upstream skills. Runs four phases: remove stale, update existing, add missing, link local. Uses `skills list -g --json` to diff current state against desired state. Skills with `@` target a specific skill from a multi-skill repo; without `@` installs all skills from the repo.
 - `link-skills.sh` — Symlinks each `skills/<name>/` directory into both `~/.agents/skills/` and `~/.claude/skills/`.
 - `skills/<name>/SKILL.md` — Each local skill is a single markdown file with YAML frontmatter (`name`, `description`) followed by the skill prompt content.
+
+## Forked Skills
+
+- `skills/agents-md/SKILL.md` — Generated from upstream `getsentry/skills@agents-md` by `maintenance/sync-agents-md.sh`. Do not hand-edit. The Commit Attribution section is removed. CI syncs it weekly.
+- `maintenance/test-agents-md.sh` — Validates the generated `agents-md` fork before it is written or committed.
 
 ## Adding a New Local Skill
 

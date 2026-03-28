@@ -1,0 +1,30 @@
+name: Sync agents-md from upstream
+
+on:
+  schedule:
+    - cron: "0 9 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sync patched skill
+        run: bash maintenance/sync-agents-md.sh
+
+      - name: Validate patched skill
+        run: bash maintenance/test-agents-md.sh
+
+      - name: Commit if changed
+        run: |
+          git diff --quiet -- skills/agents-md/SKILL.md && exit 0
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add skills/agents-md/SKILL.md
+          git commit -m "chore: sync agents-md from upstream"
+          git push

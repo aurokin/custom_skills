@@ -39,7 +39,6 @@ main() {
         "expo/skills@native-data-fetching"
         "expo/skills@upgrading-expo"
         "expo/skills@use-dom"
-        "getsentry/skills@agents-md"
         "openai/skills@openai-docs"
         "openai/skills@pdf"
         "openai/skills@screenshot"

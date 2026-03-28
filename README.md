@@ -29,10 +29,17 @@ To link local skills only (without syncing upstream):
 ./link-skills.sh
 ```
 
+To refresh the forked `agents-md` skill from upstream:
+
+```bash
+bash maintenance/sync-agents-md.sh
+```
+
 ## Local Skills
 
 | Skill | Description |
 |-------|-------------|
+| `agents-md` | Fork of `getsentry/skills@agents-md` with commit attribution guidance removed; synced from upstream by `maintenance/sync-agents-md.sh` |
 | `plan-reviewer` | Skeptical review of implementation plans/design docs to surface risks, edge cases, and simpler alternatives |
 
 ## Adding New Skills
