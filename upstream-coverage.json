@@ -1,0 +1,14 @@
+{
+  "repos": [
+    {
+      "repo": "vercel-labs/agent-browser",
+      "ignored": []
+    },
+    {
+      "repo": "waynesutton/convexskills",
+      "ignored": [
+        "avoid-feature-creep"
+      ]
+    }
+  ]
+}
