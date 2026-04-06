@@ -53,6 +53,7 @@ main() {
         "vercel-labs/agent-skills@vercel-react-native-skills"
         "vercel-labs/agent-skills@web-design-guidelines"
         "vercel-labs/skills@find-skills"
+        "dedene/raindrop-cli@raindrop-cli"
         "waynesutton/convexskills"
     )
 
