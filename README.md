@@ -67,7 +67,6 @@ If upstream adds a new skill in one of those repos, `./install-repro-skills.sh` 
 | Skill | Description |
 |-------|-------------|
 | `agents-md` | Fork of `getsentry/skills@agents-md` with commit attribution guidance removed; synced from upstream by `maintenance/sync-agents-md.sh` |
-| `plan-reviewer` | Skeptical review of implementation plans/design docs to surface risks, edge cases, and simpler alternatives |
 
 ## Adding New Skills
 
