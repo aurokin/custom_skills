@@ -42,7 +42,7 @@ Deploy curated skill families into a target directory using project-scoped
 `skills add --copy` installs.
 
 Options:
-  --target DIR          Directory to install into; leading ~ is expanded
+  --target DIR          Directory to install into; expands current-user ~ and ~/...
   --family NAME         Family to deploy; repeatable
   --all-families        Deploy every configured family
   --agents "A B"        Agents to install for
