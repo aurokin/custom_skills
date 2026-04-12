@@ -42,7 +42,7 @@ Deploy curated skill families into a target directory using project-scoped
 `skills add --copy` installs.
 
 Options:
-  --target DIR          Directory to install into
+  --target DIR          Directory to install into; leading ~ is expanded
   --family NAME         Family to deploy; repeatable
   --all-families        Deploy every configured family
   --agents "A B"        Agents to install for
@@ -176,6 +176,22 @@ resolve_target_repo() {
         cd "$target_dir"
         pwd -P
     )
+}
+
+expand_target_path() {
+    local target_dir="$1"
+
+    case "$target_dir" in
+        "~")
+            printf '%s\n' "$HOME"
+            ;;
+        "~/"*)
+            printf '%s/%s\n' "$HOME" "${target_dir:2}"
+            ;;
+        *)
+            printf '%s\n' "$target_dir"
+            ;;
+    esac
 }
 
 dedupe_families() {
@@ -313,6 +329,8 @@ main() {
         usage >&2
         exit 1
     fi
+
+    target_dir="$(expand_target_path "$target_dir")"
 
     if [ "$use_all_families" -eq 1 ]; then
         mapfile -t families < <(list_family_names)

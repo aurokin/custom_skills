@@ -46,6 +46,7 @@ Use it when a repo needs a focused set of skills, for example Expo or Convex, wi
 
 Behavior:
 - targets the exact directory you choose
+- expands a leading `~` in target paths, including interactive input and quoted `--target` values
 - works in plain directories and git repos
 - copies skills into the project-managed agent directories
 - installs only the selected families

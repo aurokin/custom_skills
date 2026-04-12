@@ -233,9 +233,12 @@ EOF
 
 setup_test_env() {
     TEST_ROOT="$(mktemp -d)"
+    TEST_HOME="$TEST_ROOT/home"
     PROJECT_ROOT="$TEST_ROOT/project"
     NESTED_TARGET="$PROJECT_ROOT/apps/mobile"
     PLAIN_TARGET="$TEST_ROOT/plain-project"
+    QUOTED_TILDE_TARGET="$TEST_HOME/quoted-target"
+    INTERACTIVE_TILDE_TARGET="$TEST_HOME/interactive-target"
     MOCK_REPOS="$TEST_ROOT/mock-repos"
     LOG_FILE="$TEST_ROOT/skills.log"
     GIT_LOG_FILE="$TEST_ROOT/git.log"
@@ -248,7 +251,14 @@ setup_test_env() {
     export FAKE_GIT_ROOT="$MOCK_REPOS"
     export FAKE_GIT_FAIL_REPOS=""
 
-    mkdir -p "$TEST_ROOT/bin" "$NESTED_TARGET" "$PLAIN_TARGET" "$MOCK_REPOS"
+    mkdir -p \
+        "$TEST_ROOT/bin" \
+        "$TEST_HOME" \
+        "$NESTED_TARGET" \
+        "$PLAIN_TARGET" \
+        "$QUOTED_TILDE_TARGET" \
+        "$INTERACTIVE_TILDE_TARGET" \
+        "$MOCK_REPOS"
     : > "$LOG_FILE"
     : > "$GIT_LOG_FILE"
     cp "$FAMILY_MANIFEST_TEMPLATE" "$FAMILY_MANIFEST_FILE"
@@ -412,6 +422,23 @@ test_noninteractive_deploy_non_git_target() {
     assert_log_not_contains "add|waynesutton/convexskills|"
 }
 
+test_noninteractive_deploy_expands_quoted_tilde_target() {
+    (
+        cd "$REPO_DIR"
+        HOME="$TEST_HOME" \
+        SKILLS_BIN="$TEST_ROOT/bin/skills" \
+        SKILLS_AUDIT_REPO_COVERAGE=0 \
+        "$DEPLOY_SCRIPT" \
+            --target '~/quoted-target' \
+            --family expo \
+            --yes
+    ) > "$OUTPUT_FILE" 2>&1
+
+    assert_contains "$OUTPUT_FILE" "Deploying skills to target directory: $QUOTED_TILDE_TARGET"
+    assert_log_contains "pwd|$QUOTED_TILDE_TARGET"
+    assert_log_contains "add|expo/skills|agents=codex opencode gemini-cli github-copilot claude-code|skills=building-native-ui expo-api-routes expo-cicd-workflows expo-deployment expo-dev-client expo-tailwind-setup native-data-fetching upgrading-expo use-dom|copy=1|yes=1"
+}
+
 test_interactive_deploy() {
     (
         cd "$REPO_DIR"
@@ -424,6 +451,22 @@ test_interactive_deploy() {
     assert_contains "$OUTPUT_FILE" "Families: expo"
     assert_log_contains "add|expo/skills|agents=codex opencode gemini-cli github-copilot claude-code|skills=building-native-ui expo-api-routes expo-cicd-workflows expo-deployment expo-dev-client expo-tailwind-setup native-data-fetching upgrading-expo use-dom|copy=1|yes=1"
     assert_log_not_contains "add|waynesutton/convexskills|"
+}
+
+test_interactive_deploy_expands_tilde_target() {
+    (
+        cd "$REPO_DIR"
+        printf '%s\n\nexpo\ny\n' '~/interactive-target' | \
+            HOME="$TEST_HOME" \
+            SKILLS_BIN="$TEST_ROOT/bin/skills" \
+            SKILLS_AUDIT_REPO_COVERAGE=0 \
+            "$DEPLOY_SCRIPT" --interactive
+    ) > "$OUTPUT_FILE" 2>&1
+
+    assert_contains "$OUTPUT_FILE" "Deploying skills to target directory: $INTERACTIVE_TILDE_TARGET"
+    assert_contains "$OUTPUT_FILE" "Families: expo"
+    assert_log_contains "pwd|$INTERACTIVE_TILDE_TARGET"
+    assert_log_contains "add|expo/skills|agents=codex opencode gemini-cli github-copilot claude-code|skills=building-native-ui expo-api-routes expo-cicd-workflows expo-deployment expo-dev-client expo-tailwind-setup native-data-fetching upgrading-expo use-dom|copy=1|yes=1"
 }
 
 test_all_families_deploy() {
@@ -543,7 +586,9 @@ run_test "help without dependencies" test_help_without_dependencies
 run_test "missing flag values fail fast" test_missing_flag_values_fail_fast
 run_test "non-interactive deploy" test_noninteractive_deploy
 run_test "non-interactive deploy to non-git target" test_noninteractive_deploy_non_git_target
+run_test "non-interactive deploy expands quoted tilde target" test_noninteractive_deploy_expands_quoted_tilde_target
 run_test "interactive deploy" test_interactive_deploy
+run_test "interactive deploy expands tilde target" test_interactive_deploy_expands_tilde_target
 run_test "all families deploy" test_all_families_deploy
 run_test "repo-wide family spec installs all skills" test_repo_wide_family_spec_installs_all_skills
 run_test "family audit warning is non-fatal" test_family_audit_warning_nonfatal
