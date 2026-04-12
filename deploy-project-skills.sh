@@ -180,13 +180,22 @@ resolve_target_repo() {
 
 expand_target_path() {
     local target_dir="$1"
+    local home_dir="${HOME:-}"
 
     case "$target_dir" in
         "~")
-            printf '%s\n' "$HOME"
+            if [ -z "$home_dir" ]; then
+                echo "Cannot expand ~ in target path because HOME is not set; pass an absolute path or export HOME." >&2
+                return 1
+            fi
+            printf '%s\n' "$home_dir"
             ;;
         "~/"*)
-            printf '%s/%s\n' "$HOME" "${target_dir:2}"
+            if [ -z "$home_dir" ]; then
+                echo "Cannot expand ~ in target path because HOME is not set; pass an absolute path or export HOME." >&2
+                return 1
+            fi
+            printf '%s/%s\n' "$home_dir" "${target_dir:2}"
             ;;
         *)
             printf '%s\n' "$target_dir"

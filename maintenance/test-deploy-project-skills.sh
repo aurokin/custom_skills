@@ -439,6 +439,21 @@ test_noninteractive_deploy_expands_quoted_tilde_target() {
     assert_log_contains "add|expo/skills|agents=codex opencode gemini-cli github-copilot claude-code|skills=building-native-ui expo-api-routes expo-cicd-workflows expo-deployment expo-dev-client expo-tailwind-setup native-data-fetching upgrading-expo use-dom|copy=1|yes=1"
 }
 
+test_quoted_tilde_target_without_home_fails_cleanly() {
+    if (
+        cd "$REPO_DIR"
+        env -u HOME "$DEPLOY_SCRIPT" \
+            --target '~/quoted-target' \
+            --family expo \
+            --dry-run
+    ) > "$OUTPUT_FILE" 2>&1; then
+        fail "expected quoted tilde target without HOME to fail"
+    fi
+
+    assert_contains "$OUTPUT_FILE" "Cannot expand ~ in target path because HOME is not set; pass an absolute path or export HOME."
+    assert_not_contains "$OUTPUT_FILE" "unbound variable"
+}
+
 test_interactive_deploy() {
     (
         cd "$REPO_DIR"
@@ -587,6 +602,7 @@ run_test "missing flag values fail fast" test_missing_flag_values_fail_fast
 run_test "non-interactive deploy" test_noninteractive_deploy
 run_test "non-interactive deploy to non-git target" test_noninteractive_deploy_non_git_target
 run_test "non-interactive deploy expands quoted tilde target" test_noninteractive_deploy_expands_quoted_tilde_target
+run_test "quoted tilde target without HOME fails cleanly" test_quoted_tilde_target_without_home_fails_cleanly
 run_test "interactive deploy" test_interactive_deploy
 run_test "interactive deploy expands tilde target" test_interactive_deploy_expands_tilde_target
 run_test "all families deploy" test_all_families_deploy
