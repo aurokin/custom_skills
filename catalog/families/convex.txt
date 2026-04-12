@@ -1,0 +1,13 @@
+waynesutton/convexskills@convex
+waynesutton/convexskills@convex-agents
+waynesutton/convexskills@convex-best-practices
+waynesutton/convexskills@convex-component-authoring
+waynesutton/convexskills@convex-cron-jobs
+waynesutton/convexskills@convex-file-storage
+waynesutton/convexskills@convex-functions
+waynesutton/convexskills@convex-http-actions
+waynesutton/convexskills@convex-migrations
+waynesutton/convexskills@convex-realtime
+waynesutton/convexskills@convex-schema-validator
+waynesutton/convexskills@convex-security-audit
+waynesutton/convexskills@convex-security-check

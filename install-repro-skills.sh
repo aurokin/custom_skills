@@ -8,6 +8,11 @@ SKILLS_AGENTS="${SKILLS_AGENTS:-codex opencode gemini-cli github-copilot claude-
 SKILLS_AUDIT_REPO_COVERAGE="${SKILLS_AUDIT_REPO_COVERAGE:-1}"
 UPSTREAM_COVERAGE_FILE="${UPSTREAM_COVERAGE_FILE:-$SCRIPT_DIR/upstream-coverage.json}"
 
+# shellcheck source=lib/catalog.sh
+source "$SCRIPT_DIR/lib/catalog.sh"
+# shellcheck source=lib/upstream-audit.sh
+source "$SCRIPT_DIR/lib/upstream-audit.sh"
+
 require_cmd() {
     if ! command -v "$1" >/dev/null 2>&1; then
         echo "Missing required command: $1" >&2
@@ -16,125 +21,38 @@ require_cmd() {
 }
 
 warn() {
-    echo "WARN: $*" >&2
+    audit_warn "$@"
 }
 
-load_upstream_coverage_manifest() {
-    local manifest_file="$1"
+expand_full_repo_specs() {
+    local -n specs_ref="$1"
+    local -n expanded_specs_ref="$2"
+    local spec repo skill_name
+    local upstream_skill_names
 
-    jq -er '
-        .repos
-        | if type != "array" then error("expected .repos to be an array") else . end
-        | .[]
-        | [
-            (.repo | if type == "string" and length > 0 then . else error("repo must be a non-empty string") end),
-            ((.ignored // [])
-                | if type == "array" then . else error("ignored must be an array") end
-                | join(" "))
-          ]
-        | @tsv
-    ' "$manifest_file"
-}
-
-collect_upstream_skill_names() {
-    local repo="$1"
-    local tmp_dir repo_dir skills_root skill_file skill_name frontmatter_name
-    local skill_file_count=0
-
-    tmp_dir="$(mktemp -d)"
-    repo_dir="$tmp_dir/repo"
-    skills_root="$repo_dir/skills"
-
-    if ! git clone --depth 1 "https://github.com/${repo}.git" "$repo_dir" >/dev/null 2>&1; then
-        rm -rf "$tmp_dir"
-        return 1
-    fi
-
-    while IFS= read -r -d '' skill_file; do
-        skill_file_count=$((skill_file_count + 1))
-        skill_name="$(basename "$(dirname "$skill_file")")"
-        frontmatter_name="$(
-            awk '
-                BEGIN { in_yaml = 0 }
-                /^---$/ {
-                    if (in_yaml == 0) {
-                        in_yaml = 1
-                        next
-                    }
-                    exit
-                }
-                in_yaml && /^name:[[:space:]]*/ {
-                    sub(/^name:[[:space:]]*/, "")
-                    gsub(/^["'"'"']|["'"'"']$/, "")
-                    print
-                    exit
-                }
-            ' "$skill_file"
-        )"
-        if [ -n "$frontmatter_name" ]; then
-            skill_name="$frontmatter_name"
+    expanded_specs_ref=()
+    for spec in "${specs_ref[@]}"; do
+        if spec_has_explicit_skill "$spec"; then
+            expanded_specs_ref+=("$spec")
+            continue
         fi
-        printf '%s\n' "$skill_name"
-    done < <(find "$skills_root" -mindepth 2 -maxdepth 2 -name SKILL.md -print0 2>/dev/null)
 
-    if [ "$skill_file_count" -eq 0 ]; then
-        warn "No skills/*/SKILL.md files found in $repo; repo layout may have changed"
-        rm -rf "$tmp_dir"
-        return 1
-    fi
-
-    rm -rf "$tmp_dir"
-}
-
-audit_repo_skill_coverage() {
-    local repo="$1"
-    local declared_list="$2"
-    local ignored_list="$3"
-    local upstream_output
-    local -A declared_names=()
-    local -A ignored_names=()
-    local -A upstream_names=()
-    local -a unexpected_names=()
-    local -a missing_names=()
-    local name
-
-    for name in $declared_list; do
-        declared_names["$name"]=1
-    done
-    for name in $ignored_list; do
-        ignored_names["$name"]=1
-    done
-
-    if ! upstream_output="$(collect_upstream_skill_names "$repo" | sort -u)"; then
-        return 1
-    fi
-
-    while IFS= read -r name; do
-        [ -z "$name" ] && continue
-        upstream_names["$name"]=1
-        if [[ -z "${declared_names[$name]:-}" && -z "${ignored_names[$name]:-}" ]]; then
-            unexpected_names+=("$name")
+        repo="$(spec_repo "$spec")"
+        if ! command -v git >/dev/null 2>&1; then
+            echo "Cannot expand repo-wide skill spec without git: $repo" >&2
+            exit 1
         fi
-    done <<< "$upstream_output"
 
-    for name in "${!declared_names[@]}"; do
-        if [[ -z "${upstream_names[$name]:-}" ]]; then
-            missing_names+=("$name")
+        if ! upstream_skill_names="$(collect_upstream_skill_names "$repo" | sort -u)"; then
+            echo "Failed to expand repo-wide skill spec: $repo" >&2
+            exit 1
         fi
+
+        while IFS= read -r skill_name; do
+            [ -z "$skill_name" ] && continue
+            expanded_specs_ref+=("$repo@$skill_name")
+        done <<< "$upstream_skill_names"
     done
-
-    if [ "${#unexpected_names[@]}" -gt 0 ]; then
-        warn "Undeclared upstream skill(s) in $repo: ${unexpected_names[*]}"
-    fi
-    if [ "${#missing_names[@]}" -gt 0 ]; then
-        warn "Declared skill(s) no longer found in $repo: ${missing_names[*]}"
-    fi
-
-    if [ "${#unexpected_names[@]}" -gt 0 ] || [ "${#missing_names[@]}" -gt 0 ]; then
-        return 2
-    fi
-
-    return 0
 }
 
 main() {
@@ -148,64 +66,25 @@ main() {
         exit 1
     fi
 
-    # Source of truth: desired skill specs.
+    # Source of truth: desired global skill specs.
     # Keep this list fully explicit so stale-skill removal can compare exact
     # names and the curated set does not drift when upstream repos add skills.
-    local specs=(
-        "anthropics/skills@frontend-design"
-        "anthropics/skills@webapp-testing"
-        "expo/skills@building-native-ui"
-        "expo/skills@expo-api-routes"
-        "expo/skills@expo-cicd-workflows"
-        "expo/skills@expo-deployment"
-        "expo/skills@expo-dev-client"
-        "expo/skills@expo-tailwind-setup"
-        "expo/skills@native-data-fetching"
-        "expo/skills@upgrading-expo"
-        "expo/skills@use-dom"
-        "openai/skills@openai-docs"
-        "openai/skills@pdf"
-        "openai/skills@screenshot"
-        "openai/skills@security-best-practices"
-        "openai/skills@skill-creator"
-        "openai/skills@spreadsheet"
-        "steipete/clawdis@github"
-        "steipete/clawdis@tmux"
-        "vercel-labs/agent-browser@agent-browser"
-        "vercel-labs/agent-browser@agentcore"
-        "vercel-labs/agent-browser@dogfood"
-        "vercel-labs/agent-browser@electron"
-        "vercel-labs/agent-browser@slack"
-        "vercel-labs/agent-browser@vercel-sandbox"
-        "vercel-labs/agent-skills@vercel-composition-patterns"
-        "vercel-labs/agent-skills@vercel-react-best-practices"
-        "vercel-labs/agent-skills@vercel-react-native-skills"
-        "vercel-labs/agent-skills@web-design-guidelines"
-        "vercel-labs/skills@find-skills"
-        "dedene/raindrop-cli@raindrop-cli"
-        "waynesutton/convexskills@convex"
-        "waynesutton/convexskills@convex-agents"
-        "waynesutton/convexskills@convex-best-practices"
-        "waynesutton/convexskills@convex-component-authoring"
-        "waynesutton/convexskills@convex-cron-jobs"
-        "waynesutton/convexskills@convex-file-storage"
-        "waynesutton/convexskills@convex-functions"
-        "waynesutton/convexskills@convex-http-actions"
-        "waynesutton/convexskills@convex-migrations"
-        "waynesutton/convexskills@convex-realtime"
-        "waynesutton/convexskills@convex-schema-validator"
-        "waynesutton/convexskills@convex-security-audit"
-        "waynesutton/convexskills@convex-security-check"
-    )
+    local specs=()
+    load_global_specs specs
+
+    local expanded_specs=()
+    expand_full_repo_specs specs expanded_specs
 
     echo "Syncing global skills for agents: ${skills_agents[*]}"
 
     # Build set of exact expected skill names from the curated specs.
     local -A desired_names=()
     local -A declared_by_repo=()
-    for spec in "${specs[@]}"; do
-        local repo="${spec%@*}"
-        local name="${spec##*@}"
+    for spec in "${expanded_specs[@]}"; do
+        local repo
+        local name
+        repo="$(spec_repo "$spec")"
+        name="$(spec_skill "$spec")"
         desired_names["${spec##*@}"]=1
         if [[ -z "${declared_by_repo[$repo]:-}" ]]; then
             declared_by_repo["$repo"]="$name"
@@ -220,15 +99,8 @@ main() {
         if [ ! -f "$UPSTREAM_COVERAGE_FILE" ]; then
             warn "Skipping upstream repo coverage audit because manifest is missing: $UPSTREAM_COVERAGE_FILE"
         else
-            local coverage_manifest
-            if ! coverage_manifest="$(load_upstream_coverage_manifest "$UPSTREAM_COVERAGE_FILE")"; then
+            if ! load_coverage_manifest_into_maps "$UPSTREAM_COVERAGE_FILE" coverage_repos ignored_by_repo; then
                 warn "Skipping upstream repo coverage audit because manifest is invalid: $UPSTREAM_COVERAGE_FILE"
-            else
-                while IFS=$'\t' read -r coverage_repo ignored_list; do
-                    [ -z "$coverage_repo" ] && continue
-                    coverage_repos+=("$coverage_repo")
-                    ignored_by_repo["$coverage_repo"]="$ignored_list"
-                done <<< "$coverage_manifest"
             fi
         fi
     fi
@@ -316,9 +188,11 @@ main() {
     echo "Adding skills..."
     local -A missing_by_repo=()
     local repo_order=()
-    for spec in "${specs[@]}"; do
-        local repo="${spec%@*}"
-        local name="${spec##*@}"
+    for spec in "${expanded_specs[@]}"; do
+        local repo
+        local name
+        repo="$(spec_repo "$spec")"
+        name="$(spec_skill "$spec")"
         if [[ -z "${installed_names[$name]:-}" ]]; then
             if [[ -z "${missing_by_repo[$repo]:-}" ]]; then
                 repo_order+=("$repo")

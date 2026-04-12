@@ -1,0 +1,14 @@
+{
+  "repos": [
+    {
+      "repo": "expo/skills",
+      "ignored": []
+    },
+    {
+      "repo": "waynesutton/convexskills",
+      "ignored": [
+        "avoid-feature-creep"
+      ]
+    }
+  ]
+}

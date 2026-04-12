@@ -1,81 +1,139 @@
 # Custom Skills
 
-Custom and upstream skills managed globally via `~/.agents/skills` and `~/.claude/skills`.
+Curated local and upstream skills for multiple coding agents.
 
-## Setup
+This repo has two distinct workflows:
 
-Run the install script to sync the full skill setup:
+1. Global normalization for your personal always-on setup
+2. Project deployment for repo-specific skill families like Expo and Convex
+
+## Requirements
+
+- `skills` CLI
+- `jq`
+- `git`
+- `curl` for the `agents-md` sync maintenance script
+
+## Scripts
+
+### `./install-repro-skills.sh`
+
+Normalizes your global skill setup under `~/.agents/skills` and `~/.claude/skills`.
+
+It will:
+- remove globally installed skills that are no longer in the curated global catalog
+- update existing global skills
+- add any missing curated global skills
+- audit selected upstream repos for coverage drift
+- link local repo skills into both global skill directories
+- clean up broken symlinks in those global directories
+
+Use it when you want to update your personal baseline skill environment.
+
+Examples:
 
 ```bash
 ./install-repro-skills.sh
+SKILLS_AGENTS="codex opencode" ./install-repro-skills.sh
+SKILLS_AUDIT_REPO_COVERAGE=0 ./install-repro-skills.sh
 ```
 
-This will:
-- Remove globally installed skills not in the script's spec list
-- Update existing skills to their latest versions
-- Add any missing skills
-- Audit selected full-coverage upstream repos and warn if they gained undeclared skills
-- Link local repo skills into `~/.agents/skills` and `~/.claude/skills`
-- Clean up broken symlinks
+### `./deploy-project-skills.sh`
 
-Default target agents: `codex`, `opencode`, `gemini-cli`, `github-copilot`, `claude-code`. Override with:
+Deploys curated skill families into a target directory with project-scoped `skills add --copy` installs.
+
+Use it when a repo needs a focused set of skills, for example Expo or Convex, without making them part of your global always-on setup.
+
+Behavior:
+- targets the exact directory you choose
+- works in plain directories and git repos
+- copies skills into the project-managed agent directories
+- installs only the selected families
+- does not normalize or remove unrelated project skills
+- audits selected curated family repos for upstream drift when coverage manifests are configured
+
+Interactive mode:
 
 ```bash
-SKILLS_AGENTS="codex opencode" ./install-repro-skills.sh
+./deploy-project-skills.sh --interactive
 ```
 
-To link local skills only (without syncing upstream):
+Non-interactive mode:
+
+```bash
+./deploy-project-skills.sh \
+  --target ~/code/my-app \
+  --family expo \
+  --family convex \
+  --agents "codex claude-code" \
+  --yes
+```
+
+List available families:
+
+```bash
+./deploy-project-skills.sh --list-families
+```
+
+### `./link-skills.sh`
+
+Symlinks local repo skills from `skills/` into:
+- `~/.agents/skills`
+- `~/.claude/skills`
+
+Use it when you only want to refresh local repo skills without touching upstream packages.
 
 ```bash
 ./link-skills.sh
 ```
 
-To refresh the forked `agents-md` skill from upstream:
+### `bash maintenance/sync-agents-md.sh`
+
+Refreshes the forked `agents-md` local skill from upstream `getsentry/skills@agents-md`.
+
+`skills/agents-md/SKILL.md` is generated output. Do not edit it by hand.
 
 ```bash
 bash maintenance/sync-agents-md.sh
 ```
 
-To run the sync smoke tests:
+## Catalog
 
-```bash
-bash maintenance/test-install-repro-skills.sh
-```
+The source of truth is split by purpose:
 
-To skip the upstream coverage audit for a run:
+- `catalog/global-specs.txt`
+  global skills managed by `install-repro-skills.sh`
+- `catalog/families.tsv`
+  family names and descriptions for project deployment
+- `catalog/families/*.txt`
+  explicit per-family upstream skill specs
+- `catalog/family-coverage.json`
+  upstream repos that should be audited for family drift
 
-```bash
-SKILLS_AUDIT_REPO_COVERAGE=0 ./install-repro-skills.sh
-```
-
-## Upstream Coverage Audit
-
-Some upstream repos are treated as "full coverage" repos: we want an explicit entry for every upstream skill we intend to carry forward, and we want a warning if upstream adds a new one. This protects against silent drift now that the sync script no longer installs every skill from a repo by default.
-
-The audit configuration lives in `upstream-coverage.json`.
-
-Current audit behavior:
-- `vercel-labs/agent-browser` is expected to be fully covered by explicit specs
-- `waynesutton/convexskills` is expected to be fully covered except for the intentional exclusion `avoid-feature-creep`
-
-Audited repos are expected to expose skills as `skills/<name>/SKILL.md`. If that layout disappears, the sync will warn that the repo contract may have changed and skip the audit for that repo.
-
-If upstream adds a new skill in one of those repos, `./install-repro-skills.sh` will warn instead of silently installing it.
+Current project families:
+- `expo`
+- `convex`
 
 ## Local Skills
 
-| Skill | Description |
-|-------|-------------|
-| `agents-md` | Fork of `getsentry/skills@agents-md` with commit attribution guidance removed; synced from upstream by `maintenance/sync-agents-md.sh` |
+Local repo-managed skills live in `skills/<name>/SKILL.md`.
 
-## Adding New Skills
+Current local skills:
+- `agents-md`
 
-1. Create a new directory under `skills/` with your skill name
-2. Add a `SKILL.md` file containing the skill prompt
-3. Run `./install-repro-skills.sh` or `./link-skills.sh`
+To add a new local skill:
 
-```
-skills/
-  my-skill/
-    SKILL.md
+1. Create `skills/<name>/SKILL.md`
+2. Add frontmatter with `name` and `description`
+3. Run `./link-skills.sh` or `./install-repro-skills.sh`
+
+## Tests
+
+Run the shell test scripts directly:
+
+```bash
+bash maintenance/test-install-repro-skills.sh
+bash maintenance/test-link-skills.sh
+bash maintenance/test-deploy-project-skills.sh
+bash maintenance/test-agents-md.sh
 ```

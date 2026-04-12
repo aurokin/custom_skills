@@ -5,6 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 INSTALL_SCRIPT="$REPO_DIR/install-repro-skills.sh"
+GLOBAL_SPECS_FILE="$REPO_DIR/catalog/global-specs.txt"
 MANIFEST_TEMPLATE="$REPO_DIR/upstream-coverage.json"
 ORIGINAL_PATH="$PATH"
 TESTS_RUN=0
@@ -17,11 +18,22 @@ fail() {
 assert_contains() {
     local file="$1"
     local needle="$2"
-    if ! grep -Fq "$needle" "$file"; then
+    if ! grep -Fq -- "$needle" "$file"; then
         echo "--- $file ---" >&2
         cat "$file" >&2
         echo "------------" >&2
         fail "expected to find: $needle"
+    fi
+}
+
+assert_not_contains() {
+    local file="$1"
+    local needle="$2"
+    if grep -Fq -- "$needle" "$file"; then
+        echo "--- $file ---" >&2
+        cat "$file" >&2
+        echo "------------" >&2
+        fail "expected not to find: $needle"
     fi
 }
 
@@ -34,6 +46,10 @@ assert_not_exists() {
 
 assert_log_contains() {
     assert_contains "$LOG_FILE" "$1"
+}
+
+assert_log_not_contains() {
+    assert_not_contains "$LOG_FILE" "$1"
 }
 
 assert_log_count() {
@@ -50,23 +66,31 @@ assert_log_count() {
 }
 
 list_spec_names() {
-    python3 - "$INSTALL_SCRIPT" <<'PY'
+    python3 - "$GLOBAL_SPECS_FILE" <<'PY'
 from pathlib import Path
 import sys
 
-lines = Path(sys.argv[1]).read_text().splitlines()
-inside = False
-for line in lines:
-    if line.strip() == "local specs=(":
-        inside = True
+for line in Path(sys.argv[1]).read_text().splitlines():
+    line = line.strip()
+    if not line or line.startswith("#"):
         continue
-    if inside and line.strip() == ")":
-        break
-    if inside:
-        stripped = line.strip()
-        if stripped.startswith('"') and stripped.endswith('"'):
-            spec = stripped.strip('"')
-            print(spec.rsplit("@", 1)[1])
+    print(line.rsplit("@", 1)[1])
+PY
+}
+
+count_spec_repos() {
+    python3 - "$GLOBAL_SPECS_FILE" <<'PY'
+from pathlib import Path
+import sys
+
+repos = set()
+for line in Path(sys.argv[1]).read_text().splitlines():
+    line = line.strip()
+    if not line or line.startswith("#"):
+        continue
+    repos.add(line.rsplit("@", 1)[0])
+
+print(len(repos))
 PY
 }
 
@@ -86,9 +110,8 @@ EOF
 
 seed_default_mock_repos() {
     local agent_browser_root="$MOCK_REPOS/vercel-labs/agent-browser"
-    local convex_root="$MOCK_REPOS/waynesutton/convexskills"
 
-    mkdir -p "$agent_browser_root" "$convex_root"
+    mkdir -p "$agent_browser_root"
 
     create_mock_skill_file "$agent_browser_root" "agent-browser"
     create_mock_skill_file "$agent_browser_root" "agentcore"
@@ -96,21 +119,6 @@ seed_default_mock_repos() {
     create_mock_skill_file "$agent_browser_root" "electron"
     create_mock_skill_file "$agent_browser_root" "slack"
     create_mock_skill_file "$agent_browser_root" "vercel-sandbox"
-
-    create_mock_skill_file "$convex_root" "avoid-feature-creep"
-    create_mock_skill_file "$convex_root" "convex"
-    create_mock_skill_file "$convex_root" "convex-agents"
-    create_mock_skill_file "$convex_root" "convex-best-practices"
-    create_mock_skill_file "$convex_root" "convex-component-authoring"
-    create_mock_skill_file "$convex_root" "convex-cron-jobs"
-    create_mock_skill_file "$convex_root" "convex-file-storage"
-    create_mock_skill_file "$convex_root" "convex-functions"
-    create_mock_skill_file "$convex_root" "convex-http-actions"
-    create_mock_skill_file "$convex_root" "convex-migrations"
-    create_mock_skill_file "$convex_root" "convex-realtime"
-    create_mock_skill_file "$convex_root" "convex-schema-validator"
-    create_mock_skill_file "$convex_root" "convex-security-audit"
-    create_mock_skill_file "$convex_root" "convex-security-check"
 }
 
 write_fake_skills_cli() {
@@ -419,10 +427,57 @@ test_layout_drift_warning_nonfatal() {
 test_batched_adds() {
     run_sync
 
+    assert_log_count "$(count_spec_repos)" "add|"
     assert_log_count 1 "add|vercel-labs/agent-browser|"
-    assert_log_count 1 "add|waynesutton/convexskills|"
     assert_log_contains "add|vercel-labs/agent-browser|agent-browser agentcore dogfood electron slack vercel-sandbox"
-    assert_log_contains "add|waynesutton/convexskills|convex convex-agents convex-best-practices convex-component-authoring convex-cron-jobs convex-file-storage convex-functions convex-http-actions convex-migrations convex-realtime convex-schema-validator convex-security-audit convex-security-check"
+    assert_log_contains "add|openai/skills|openai-docs pdf screenshot security-best-practices skill-creator spreadsheet"
+    assert_log_not_contains "add|expo/skills|"
+    assert_log_not_contains "add|waynesutton/convexskills|"
+}
+
+test_invalid_global_spec_fails_fast() {
+    local bad_specs_file="$TEST_ROOT/bad-global-specs.txt"
+    cat > "$bad_specs_file" <<'EOF'
+openai
+EOF
+
+    if (
+        cd "$REPO_DIR"
+        GLOBAL_SPECS_FILE="$bad_specs_file" \
+        SKILLS_BIN="$TEST_ROOT/bin/skills" \
+        UPSTREAM_COVERAGE_FILE="$TEST_ROOT/upstream-coverage.json" \
+        "$INSTALL_SCRIPT"
+    ) > "$OUTPUT_FILE" 2>&1; then
+        fail "expected install script to reject malformed global specs"
+    fi
+
+    assert_contains "$OUTPUT_FILE" "Invalid skill spec in $bad_specs_file:1: openai"
+    assert_log_not_contains "add|"
+    assert_log_not_contains "remove|"
+}
+
+test_repo_wide_global_spec_expands_to_all_skills() {
+    local wide_specs_file="$TEST_ROOT/wide-global-specs.txt"
+    cat > "$wide_specs_file" <<'EOF'
+vercel-labs/agent-browser
+EOF
+
+    run_sync_with_env GLOBAL_SPECS_FILE="$wide_specs_file"
+
+    assert_contains "$OUTPUT_FILE" "No stale skills to remove."
+    assert_log_count 1 "add|vercel-labs/agent-browser|"
+    assert_log_contains "add|vercel-labs/agent-browser|agent-browser agentcore dogfood electron slack vercel-sandbox"
+}
+
+run_sync_with_env() {
+    (
+        cd "$REPO_DIR"
+        env \
+            SKILLS_BIN="$TEST_ROOT/bin/skills" \
+            UPSTREAM_COVERAGE_FILE="$TEST_ROOT/upstream-coverage.json" \
+            "$@" \
+            "$INSTALL_SCRIPT"
+    ) > "$OUTPUT_FILE" 2>&1
 }
 
 run_test "clean noop" test_clean_noop
@@ -431,5 +486,7 @@ run_test "drift warning is non-fatal" test_drift_warning_nonfatal
 run_test "audit clone failure is non-fatal" test_audit_clone_failure_nonfatal
 run_test "layout drift warning is non-fatal" test_layout_drift_warning_nonfatal
 run_test "batched adds by repo" test_batched_adds
+run_test "invalid global spec fails fast" test_invalid_global_spec_fails_fast
+run_test "repo-wide global spec expands to all skills" test_repo_wide_global_spec_expands_to_all_skills
 
 echo "PASSED: $TESTS_RUN test(s)"
