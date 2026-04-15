@@ -59,10 +59,28 @@ EOF
 }
 
 print_families() {
+    local family_names_output
     local family_name
+
+    family_names_output="$(list_family_names)" || return 1
     while IFS= read -r family_name; do
+        [ -z "$family_name" ] && continue
         printf '%s\t%s\n' "$family_name" "$(get_family_description "$family_name")"
-    done < <(list_family_names)
+    done <<< "$family_names_output"
+}
+
+read_family_names_into_array() {
+    local target_name="$1"
+    local -n target_ref="$target_name"
+    local family_names_output
+    local family_name
+
+    family_names_output="$(list_family_names)" || return 1
+    target_ref=()
+    while IFS= read -r family_name; do
+        [ -z "$family_name" ] && continue
+        target_ref+=("$family_name")
+    done <<< "$family_names_output"
 }
 
 prompt_for_target() {
@@ -92,19 +110,23 @@ prompt_for_agents() {
 }
 
 prompt_for_families() {
+    local target_name="$1"
+    local -n target_ref="$target_name"
     local family_name
     local family_names=()
     local family_descriptions=()
     local response
     local token
     local index
+    local family_status
     local selected=()
     local seen=""
 
-    while IFS= read -r family_name; do
-        family_names+=("$family_name")
+    target_ref=()
+    read_family_names_into_array family_names || return $?
+    for family_name in "${family_names[@]}"; do
         family_descriptions+=("$(get_family_description "$family_name")")
-    done < <(list_family_names)
+    done
 
     echo "Available families:" >&2
     for index in "${!family_names[@]}"; do
@@ -118,7 +140,7 @@ prompt_for_families() {
     read -r response
 
     if [ -z "$response" ] || [ "$response" = "all" ]; then
-        printf '%s\n' "${family_names[@]}"
+        target_ref=("${family_names[@]}")
         return 0
     fi
 
@@ -133,10 +155,27 @@ prompt_for_families() {
             token="${family_names[$index]}"
         fi
 
-        if ! family_exists "$token"; then
-            echo "Unknown family: $token" >&2
-            return 1
+        family_status=0
+        if family_exists "$token"; then
+            family_status=0
+        else
+            family_status=$?
         fi
+
+        case "$family_status" in
+            0)
+                ;;
+            1)
+                echo "Unknown family: $token" >&2
+                return 1
+                ;;
+            2)
+                return 1
+                ;;
+            *)
+                return "$family_status"
+                ;;
+        esac
 
         if [[ " $seen " != *" $token "* ]]; then
             selected+=("$token")
@@ -144,7 +183,7 @@ prompt_for_families() {
         fi
     done
 
-    printf '%s\n' "${selected[@]}"
+    target_ref=("${selected[@]}")
 }
 
 confirm_or_exit() {
@@ -329,7 +368,7 @@ main() {
         target_dir="$(prompt_for_target "${target_dir:-$PWD}")"
         agents_string="$(prompt_for_agents "$agents_string")"
         if [ "$use_all_families" -eq 0 ] && [ "${#families[@]}" -eq 0 ]; then
-            mapfile -t families < <(prompt_for_families)
+            prompt_for_families families
         fi
     fi
 
@@ -342,7 +381,7 @@ main() {
     target_dir="$(expand_target_path "$target_dir")"
 
     if [ "$use_all_families" -eq 1 ]; then
-        mapfile -t families < <(list_family_names)
+        read_family_names_into_array families
     fi
 
     if [ "${#families[@]}" -eq 0 ]; then
@@ -353,11 +392,30 @@ main() {
     dedupe_families families
 
     local family_name
+    local family_status
     for family_name in "${families[@]}"; do
-        if ! family_exists "$family_name"; then
-            echo "Unknown family: $family_name" >&2
-            exit 1
+        family_status=0
+        if family_exists "$family_name"; then
+            family_status=0
+        else
+            family_status=$?
         fi
+
+        case "$family_status" in
+            0)
+                continue
+                ;;
+            1)
+                echo "Unknown family: $family_name" >&2
+                exit 1
+                ;;
+            2)
+                exit 1
+                ;;
+            *)
+                exit "$family_status"
+                ;;
+        esac
     done
 
     local install_root

@@ -1,0 +1,19 @@
+{
+  "globalSpecs": [
+    "owner/repo@my-global-skill"
+  ],
+  "familySpecs": {
+    "expo": [
+      "owner/repo@my-expo-skill"
+    ]
+  },
+  "customFamilies": {
+    "acme-mobile": {
+      "description": "Optional company mobile workflow skills",
+      "specs": [
+        "owner/repo@mobile-release-skill",
+        "owner/repo@qa-playbook"
+      ]
+    }
+  }
+}

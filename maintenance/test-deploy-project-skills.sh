@@ -484,6 +484,80 @@ test_interactive_deploy_expands_tilde_target() {
     assert_log_contains "add|expo/skills|agents=codex opencode gemini-cli github-copilot claude-code|skills=building-native-ui expo-api-routes expo-cicd-workflows expo-deployment expo-dev-client expo-tailwind-setup native-data-fetching upgrading-expo use-dom|copy=1|yes=1"
 }
 
+test_interactive_deploy_aborts_on_invalid_local_config() {
+    local local_config_file="$TEST_ROOT/.skills.local.json"
+    cat > "$local_config_file" <<'EOF'
+{
+  "customFamilies": []
+}
+EOF
+
+    if (
+        cd "$REPO_DIR"
+        printf '%s\n\n' "$PROJECT_ROOT" | \
+            LOCAL_SKILLS_CONFIG_FILE="$local_config_file" \
+            SKILLS_BIN="$TEST_ROOT/bin/skills" \
+            SKILLS_AUDIT_REPO_COVERAGE=0 \
+            "$DEPLOY_SCRIPT" --interactive
+    ) > "$OUTPUT_FILE" 2>&1; then
+        fail "expected interactive deploy to abort on invalid local config"
+    fi
+
+    assert_contains "$OUTPUT_FILE" "Invalid local skills config in $local_config_file"
+    assert_not_contains "$OUTPUT_FILE" "Select at least one family with --family or --all-families"
+    assert_log_not_contains "add|"
+}
+
+test_noninteractive_custom_family_reports_invalid_local_config() {
+    local local_config_file="$TEST_ROOT/.skills.local.json"
+    cat > "$local_config_file" <<'EOF'
+{
+  "customFamilies": []
+}
+EOF
+
+    if (
+        cd "$REPO_DIR"
+        LOCAL_SKILLS_CONFIG_FILE="$local_config_file" \
+        SKILLS_BIN="$TEST_ROOT/bin/skills" \
+        SKILLS_AUDIT_REPO_COVERAGE=0 \
+        "$DEPLOY_SCRIPT" \
+            --target "$PLAIN_TARGET" \
+            --family acme-mobile \
+            --yes
+    ) > "$OUTPUT_FILE" 2>&1; then
+        fail "expected non-interactive deploy to abort on invalid local config"
+    fi
+
+    assert_contains "$OUTPUT_FILE" "Invalid local skills config in $local_config_file"
+    assert_not_contains "$OUTPUT_FILE" "Unknown family: acme-mobile"
+    assert_log_not_contains "add|"
+}
+
+test_interactive_family_selection_reports_invalid_local_config() {
+    local local_config_file="$TEST_ROOT/.skills.local.json"
+    cat > "$local_config_file" <<'EOF'
+{
+  "customFamilies": []
+}
+EOF
+
+    if (
+        cd "$REPO_DIR"
+        printf '%s\n\nacme-mobile\n' "$PROJECT_ROOT" | \
+            LOCAL_SKILLS_CONFIG_FILE="$local_config_file" \
+            SKILLS_BIN="$TEST_ROOT/bin/skills" \
+            SKILLS_AUDIT_REPO_COVERAGE=0 \
+            "$DEPLOY_SCRIPT" --interactive
+    ) > "$OUTPUT_FILE" 2>&1; then
+        fail "expected interactive family selection to abort on invalid local config"
+    fi
+
+    assert_contains "$OUTPUT_FILE" "Invalid local skills config in $local_config_file"
+    assert_not_contains "$OUTPUT_FILE" "Unknown family: acme-mobile"
+    assert_log_not_contains "add|"
+}
+
 test_all_families_deploy() {
     (
         cd "$REPO_DIR"
@@ -524,6 +598,128 @@ EOF
     assert_contains "$OUTPUT_FILE" "Families: all-openai"
     assert_contains "$OUTPUT_FILE" "openai/skills: (all skills)"
     assert_log_contains "add|openai/skills|agents=codex opencode gemini-cli github-copilot claude-code|skills=<all>|copy=1|yes=1"
+}
+
+test_local_family_specs_extend_curated_family() {
+    local local_config_file="$TEST_ROOT/.skills.local.json"
+    cat > "$local_config_file" <<'EOF'
+{
+  "familySpecs": {
+    "expo": [
+      "acme/mobile-skills@expo-internals"
+    ]
+  }
+}
+EOF
+
+    (
+        cd "$REPO_DIR"
+        LOCAL_SKILLS_CONFIG_FILE="$local_config_file" \
+        SKILLS_BIN="$TEST_ROOT/bin/skills" \
+        SKILLS_AUDIT_REPO_COVERAGE=0 \
+        "$DEPLOY_SCRIPT" \
+            --target "$PLAIN_TARGET" \
+            --family expo \
+            --yes
+    ) > "$OUTPUT_FILE" 2>&1
+
+    assert_contains "$OUTPUT_FILE" "Families: expo"
+    assert_log_contains "add|expo/skills|agents=codex opencode gemini-cli github-copilot claude-code|skills=building-native-ui expo-api-routes expo-cicd-workflows expo-deployment expo-dev-client expo-tailwind-setup native-data-fetching upgrading-expo use-dom|copy=1|yes=1"
+    assert_log_contains "add|acme/mobile-skills|agents=codex opencode gemini-cli github-copilot claude-code|skills=expo-internals|copy=1|yes=1"
+}
+
+test_custom_local_family_lists_and_deploys() {
+    local local_config_file="$TEST_ROOT/.skills.local.json"
+    cat > "$local_config_file" <<'EOF'
+{
+  "customFamilies": {
+    "acme-mobile": {
+      "description": "Acme mobile workflow skills",
+      "specs": [
+        "acme/mobile-skills@expo-internals",
+        "acme/mobile-skills@release-ops"
+      ]
+    }
+  }
+}
+EOF
+
+    (
+        cd "$REPO_DIR"
+        LOCAL_SKILLS_CONFIG_FILE="$local_config_file" \
+        SKILLS_BIN="$TEST_ROOT/bin/does-not-exist" \
+        "$DEPLOY_SCRIPT" --list-families
+    ) > "$OUTPUT_FILE" 2>&1
+
+    assert_contains "$OUTPUT_FILE" $'acme-mobile\tAcme mobile workflow skills'
+
+    (
+        cd "$REPO_DIR"
+        LOCAL_SKILLS_CONFIG_FILE="$local_config_file" \
+        SKILLS_BIN="$TEST_ROOT/bin/skills" \
+        SKILLS_AUDIT_REPO_COVERAGE=0 \
+        "$DEPLOY_SCRIPT" \
+            --target "$PLAIN_TARGET" \
+            --family acme-mobile \
+            --yes
+    ) > "$OUTPUT_FILE" 2>&1
+
+    assert_contains "$OUTPUT_FILE" "Families: acme-mobile"
+    assert_log_contains "add|acme/mobile-skills|agents=codex opencode gemini-cli github-copilot claude-code|skills=expo-internals release-ops|copy=1|yes=1"
+}
+
+test_custom_local_family_rejects_empty_specs() {
+    local local_config_file="$TEST_ROOT/.skills.local.json"
+    cat > "$local_config_file" <<'EOF'
+{
+  "customFamilies": {
+    "acme-mobile": {
+      "description": "Acme mobile workflow skills",
+      "specs": []
+    }
+  }
+}
+EOF
+
+    if (
+        cd "$REPO_DIR"
+        LOCAL_SKILLS_CONFIG_FILE="$local_config_file" \
+        SKILLS_BIN="$TEST_ROOT/bin/does-not-exist" \
+        "$DEPLOY_SCRIPT" --list-families
+    ) > "$OUTPUT_FILE" 2>&1; then
+        fail "expected empty custom family specs to fail validation"
+    fi
+
+    assert_contains "$OUTPUT_FILE" "Custom family must define at least one spec in $local_config_file:customFamilies.acme-mobile.specs"
+    assert_not_contains "$OUTPUT_FILE" $'acme-mobile\tAcme mobile workflow skills'
+}
+
+test_custom_local_family_rejects_multiline_description() {
+    local local_config_file="$TEST_ROOT/.skills.local.json"
+    cat > "$local_config_file" <<'EOF'
+{
+  "customFamilies": {
+    "acme-mobile": {
+      "description": "Line 1\nLine 2",
+      "specs": [
+        "acme/mobile-skills@expo-internals"
+      ]
+    }
+  }
+}
+EOF
+
+    if (
+        cd "$REPO_DIR"
+        LOCAL_SKILLS_CONFIG_FILE="$local_config_file" \
+        SKILLS_BIN="$TEST_ROOT/bin/does-not-exist" \
+        "$DEPLOY_SCRIPT" --list-families
+    ) > "$OUTPUT_FILE" 2>&1; then
+        fail "expected multiline custom family description to fail validation"
+    fi
+
+    assert_contains "$OUTPUT_FILE" "Invalid family description in $local_config_file:customFamilies.acme-mobile.description"
+    assert_not_contains "$OUTPUT_FILE" $'acme-mobile\t'
 }
 
 test_family_audit_warning_nonfatal() {
@@ -605,8 +801,15 @@ run_test "non-interactive deploy expands quoted tilde target" test_noninteractiv
 run_test "quoted tilde target without HOME fails cleanly" test_quoted_tilde_target_without_home_fails_cleanly
 run_test "interactive deploy" test_interactive_deploy
 run_test "interactive deploy expands tilde target" test_interactive_deploy_expands_tilde_target
+run_test "interactive deploy aborts on invalid local config" test_interactive_deploy_aborts_on_invalid_local_config
+run_test "non-interactive custom family reports invalid local config" test_noninteractive_custom_family_reports_invalid_local_config
+run_test "interactive family selection reports invalid local config" test_interactive_family_selection_reports_invalid_local_config
 run_test "all families deploy" test_all_families_deploy
 run_test "repo-wide family spec installs all skills" test_repo_wide_family_spec_installs_all_skills
+run_test "local family specs extend curated family" test_local_family_specs_extend_curated_family
+run_test "custom local family lists and deploys" test_custom_local_family_lists_and_deploys
+run_test "custom local family rejects empty specs" test_custom_local_family_rejects_empty_specs
+run_test "custom local family rejects multiline description" test_custom_local_family_rejects_multiline_description
 run_test "family audit warning is non-fatal" test_family_audit_warning_nonfatal
 run_test "dry run skips audit and install" test_dry_run_skips_audit_and_install
 run_test "invalid catalog spec fails fast" test_invalid_catalog_spec_fails_fast

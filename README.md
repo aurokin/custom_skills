@@ -7,6 +7,9 @@ This repo has two distinct workflows:
 1. Global normalization for your personal always-on setup
 2. Project deployment for repo-specific skill families like Expo and Convex
 
+It also supports an optional gitignored personal overlay file for extra global
+skills, per-family additions, and custom project families.
+
 ## Requirements
 
 - `skills` CLI
@@ -30,6 +33,9 @@ It will:
 
 Use it when you want to update your personal baseline skill environment.
 
+If `.skills.local.json` exists, its `globalSpecs` are merged into the desired
+global set before stale-skill removal runs.
+
 Examples:
 
 ```bash
@@ -43,6 +49,9 @@ SKILLS_AUDIT_REPO_COVERAGE=0 ./install-repro-skills.sh
 Deploys curated skill families into a target directory with project-scoped `skills add --copy` installs.
 
 Use it when a repo needs a focused set of skills, for example Expo or Convex, without making them part of your global always-on setup.
+
+If `.skills.local.json` exists, its `familySpecs` extend curated families and
+its `customFamilies` become selectable alongside the curated ones.
 
 Behavior:
 - targets the exact directory you choose
@@ -115,6 +124,51 @@ The source of truth is split by purpose:
 Current project families:
 - `expo`
 - `convex`
+
+## Personal Overlay
+
+Create `.skills.local.json` in the repo root to add personal skills without
+changing the curated catalog. The file is gitignored; start from
+`.skills.local.json.example`.
+
+Supported keys:
+
+- `globalSpecs`
+  additive upstream specs merged into `install-repro-skills.sh`
+- `familySpecs`
+  additive specs keyed by existing curated family name
+- `customFamilies`
+  new family definitions with `description` and `specs`
+
+Example:
+
+```json
+{
+  "globalSpecs": [
+    "owner/repo@my-global-skill"
+  ],
+  "familySpecs": {
+    "expo": [
+      "owner/repo@my-expo-skill"
+    ]
+  },
+  "customFamilies": {
+    "acme-mobile": {
+      "description": "Company mobile workflow skills",
+      "specs": [
+        "owner/repo@release-ops"
+      ]
+    }
+  }
+}
+```
+
+Rules:
+
+- local config is additive only; it does not remove curated skills
+- `familySpecs` can only target existing curated families
+- `customFamilies` cannot reuse a curated family name
+- duplicate specs are deduped with curated entries first
 
 ## Local Skills
 

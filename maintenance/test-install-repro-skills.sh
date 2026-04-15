@@ -469,6 +469,26 @@ EOF
     assert_log_contains "add|vercel-labs/agent-browser|agent-browser agentcore dogfood electron slack vercel-sandbox"
 }
 
+test_local_global_specs_are_preserved() {
+    local local_config_file="$TEST_ROOT/.skills.local.json"
+    cat > "$local_config_file" <<'EOF'
+{
+  "globalSpecs": [
+    "expo/skills@building-native-ui"
+  ]
+}
+EOF
+
+    seed_state_with_all_specs
+    printf '%s\n' "building-native-ui" >> "$STATE_FILE"
+
+    run_sync_with_env LOCAL_SKILLS_CONFIG_FILE="$local_config_file"
+
+    assert_not_contains "$OUTPUT_FILE" "Removing: building-native-ui"
+    assert_log_not_contains "remove|building-native-ui"
+    assert_log_not_contains "add|expo/skills|"
+}
+
 run_sync_with_env() {
     (
         cd "$REPO_DIR"
@@ -488,5 +508,6 @@ run_test "layout drift warning is non-fatal" test_layout_drift_warning_nonfatal
 run_test "batched adds by repo" test_batched_adds
 run_test "invalid global spec fails fast" test_invalid_global_spec_fails_fast
 run_test "repo-wide global spec expands to all skills" test_repo_wide_global_spec_expands_to_all_skills
+run_test "local global specs are preserved" test_local_global_specs_are_preserved
 
 echo "PASSED: $TESTS_RUN test(s)"
