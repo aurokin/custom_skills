@@ -637,6 +637,25 @@ EOF
     assert_log_not_contains "add|"
 }
 
+test_excluded_skill_is_ignored_in_repo_coverage_audit() {
+    local local_config_file="$TEST_ROOT/.skills.local.json"
+    cat > "$local_config_file" <<'EOF'
+{
+  "excludeGlobalSpecs": [
+    "vercel-labs/agent-browser@slack"
+  ]
+}
+EOF
+
+    seed_state_with_all_specs
+
+    run_sync_with_env LOCAL_SKILLS_CONFIG_FILE="$local_config_file"
+
+    assert_contains "$OUTPUT_FILE" "Removing: slack"
+    assert_log_contains "remove|slack"
+    assert_not_contains "$OUTPUT_FILE" "WARN: Undeclared upstream skill(s) in vercel-labs/agent-browser:"
+}
+
 test_empty_result_sync_is_valid() {
     local narrow_specs_file="$TEST_ROOT/narrow-global-specs.txt"
     local local_config_file="$TEST_ROOT/.skills.local.json"
@@ -692,6 +711,7 @@ run_test "excludeGlobalSpecs entries must be explicit skills" test_invalid_exclu
 run_test "global exclusion removes curated skill as stale" test_global_exclusion_removes_curated_skill_as_stale
 run_test "global exclusion removes locally added spec" test_global_exclusion_removes_locally_added_spec
 run_test "unknown global exclusion is a no-op" test_unknown_global_exclusion_is_noop
+run_test "excluded skill is ignored in repo coverage audit" test_excluded_skill_is_ignored_in_repo_coverage_audit
 run_test "empty-result sync is valid" test_empty_result_sync_is_valid
 
 echo "PASSED: $TESTS_RUN test(s)"

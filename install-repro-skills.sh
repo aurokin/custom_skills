@@ -78,6 +78,26 @@ filter_excluded_specs() {
     done
 }
 
+append_specs_to_repo_skill_map() {
+    local specs_name="$1"
+    local target_name="$2"
+    local -n specs_ref="$specs_name"
+    local -n target_ref="$target_name"
+    local spec
+    local repo
+    local name
+
+    for spec in "${specs_ref[@]}"; do
+        repo="$(spec_repo "$spec")"
+        name="$(spec_skill "$spec")"
+        if [[ -z "${target_ref[$repo]:-}" ]]; then
+            target_ref["$repo"]="$name"
+        else
+            target_ref["$repo"]+=" $name"
+        fi
+    done
+}
+
 main() {
     require_cmd "$SKILLS_BIN"
     require_cmd jq
@@ -109,17 +129,13 @@ main() {
     # Build set of exact expected skill names from the curated specs.
     local -A desired_names=()
     local -A declared_by_repo=()
+    append_specs_to_repo_skill_map expanded_specs declared_by_repo
     for spec in "${desired_specs[@]}"; do
         local repo
         local name
         repo="$(spec_repo "$spec")"
         name="$(spec_skill "$spec")"
         desired_names["${spec##*@}"]=1
-        if [[ -z "${declared_by_repo[$repo]:-}" ]]; then
-            declared_by_repo["$repo"]="$name"
-        else
-            declared_by_repo["$repo"]+=" $name"
-        fi
     done
 
     local -a coverage_repos=()
@@ -133,6 +149,7 @@ main() {
             fi
         fi
     fi
+    append_specs_to_repo_skill_map excluded_specs ignored_by_repo
 
     # Get currently installed global skill names (only ~/.agents/skills/).
     # The skills CLI ignores symlinks, so locally-linked skills from
