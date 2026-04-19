@@ -36,6 +36,14 @@ Use it when you want to update your personal baseline skill environment.
 If `.skills.local.json` exists, its `globalSpecs` are merged into the desired
 global set before stale-skill removal runs.
 
+Planned exclusion-override behavior and planned resolved summary output are
+documented in
+[docs/exclude-overrides.md](/home/auro/code/custom_skills/docs/exclude-overrides.md:1)
+and
+[docs/exclude-overrides-plan.md](/home/auro/code/custom_skills/docs/exclude-overrides-plan.md:1).
+The planned summary marker is `^`, meaning the final resolved set covers all
+current upstream skills for that repo.
+
 Examples:
 
 ```bash
@@ -62,6 +70,14 @@ Behavior:
 - installs only the selected families
 - does not normalize or remove unrelated project skills
 - audits selected curated family repos for upstream drift when coverage manifests are configured
+
+Planned exclusion-override behavior and planned resolved summary output are
+documented in
+[docs/exclude-overrides.md](/home/auro/code/custom_skills/docs/exclude-overrides.md:1)
+and
+[docs/exclude-overrides-plan.md](/home/auro/code/custom_skills/docs/exclude-overrides-plan.md:1).
+The planned summary marker is `^`, meaning the final resolved set covers all
+current upstream skills for that repo.
 
 Interactive mode:
 
@@ -140,6 +156,10 @@ Supported keys:
 - `customFamilies`
   new family definitions with `description` and `specs`
 
+See [docs/exclude-overrides.md](/home/auro/code/custom_skills/docs/exclude-overrides.md:1)
+for the planned exclusion-override semantics, normalization rules, and
+examples.
+
 Example:
 
 ```json
@@ -165,7 +185,7 @@ Example:
 
 Rules:
 
-- local config is additive only; it does not remove curated skills
+- local config is additive today
 - `familySpecs` can only target existing curated families
 - `customFamilies` cannot reuse a curated family name
 - duplicate specs are deduped with curated entries first
