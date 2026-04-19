@@ -208,9 +208,15 @@ main() {
         local repo
         for repo in "${repo_order[@]}"; do
             local repo_skills=()
+            local add_extra_args=()
             IFS=' ' read -r -a repo_skills <<< "${missing_by_repo[$repo]}"
             echo "  Adding from $repo: ${repo_skills[*]}"
-            "$SKILLS_BIN" add "$repo" -g -a "${skills_agents[@]}" -s "${repo_skills[@]}" -y
+            # OpenClaw hosts unverified community submissions, so the CLI requires
+            # an explicit acknowledgement before installing from that repo.
+            if [ "$repo" = "openclaw/openclaw" ]; then
+                add_extra_args+=(--dangerously-accept-openclaw-risks)
+            fi
+            "$SKILLS_BIN" add "$repo" -g -a "${skills_agents[@]}" -s "${repo_skills[@]}" -y "${add_extra_args[@]}"
         done
     fi
 
