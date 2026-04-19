@@ -66,15 +66,35 @@ assert_log_count() {
 }
 
 list_spec_names() {
-    python3 - "$GLOBAL_SPECS_FILE" <<'PY'
+    python3 - "$GLOBAL_SPECS_FILE" "$MOCK_REPOS" <<'PY'
 from pathlib import Path
 import sys
 
-for line in Path(sys.argv[1]).read_text().splitlines():
+specs_path = Path(sys.argv[1])
+mock_repos_root = Path(sys.argv[2])
+
+for line in specs_path.read_text().splitlines():
     line = line.strip()
     if not line or line.startswith("#"):
         continue
-    print(line.rsplit("@", 1)[1])
+    if "@" in line:
+        print(line.rsplit("@", 1)[1])
+        continue
+
+    repo_root = mock_repos_root / line / "skills"
+    for skill_file in sorted(repo_root.glob("*/SKILL.md")):
+        skill_name = skill_file.parent.name
+        in_frontmatter = False
+        for raw_line in skill_file.read_text().splitlines():
+            if raw_line == "---":
+                if not in_frontmatter:
+                    in_frontmatter = True
+                    continue
+                break
+            if in_frontmatter and raw_line.startswith("name:"):
+                skill_name = raw_line.split(":", 1)[1].strip().strip("\"'")
+                break
+        print(skill_name)
 PY
 }
 
@@ -393,11 +413,21 @@ test_stale_removal_and_broken_symlinks() {
 
 test_drift_warning_nonfatal() {
     seed_state_with_all_specs
-    create_mock_skill_file "$MOCK_REPOS/vercel-labs/agent-browser" "newly-added-skill"
+    cat > "$TEST_ROOT/upstream-coverage.json" <<'EOF'
+{
+  "repos": [
+    {
+      "repo": "vercel-labs/agent-skills",
+      "ignored": []
+    }
+  ]
+}
+EOF
+    create_mock_skill_file "$MOCK_REPOS/vercel-labs/agent-skills" "newly-added-skill"
 
     run_sync
 
-    assert_contains "$OUTPUT_FILE" "WARN: Undeclared upstream skill(s) in vercel-labs/agent-browser: newly-added-skill"
+    assert_contains "$OUTPUT_FILE" "WARN: Undeclared upstream skill(s) in vercel-labs/agent-skills: newly-added-skill"
     assert_contains "$OUTPUT_FILE" "Adding skills..."
     assert_contains "$OUTPUT_FILE" "No skills to add."
     assert_contains "$OUTPUT_FILE" "Done."
@@ -405,22 +435,43 @@ test_drift_warning_nonfatal() {
 
 test_audit_clone_failure_nonfatal() {
     seed_state_with_all_specs
-    export FAKE_GIT_FAIL_REPOS="vercel-labs/agent-browser"
+    cat > "$TEST_ROOT/upstream-coverage.json" <<'EOF'
+{
+  "repos": [
+    {
+      "repo": "vercel-labs/agent-skills",
+      "ignored": []
+    }
+  ]
+}
+EOF
+    export FAKE_GIT_FAIL_REPOS="vercel-labs/agent-skills"
 
     run_sync
 
-    assert_contains "$OUTPUT_FILE" "WARN: Skipping upstream repo coverage audit for vercel-labs/agent-browser"
+    assert_contains "$OUTPUT_FILE" "WARN: Skipping upstream repo coverage audit for vercel-labs/agent-skills"
     assert_contains "$OUTPUT_FILE" "Done."
 }
 
 test_layout_drift_warning_nonfatal() {
     seed_state_with_all_specs
-    rm -rf "$MOCK_REPOS/vercel-labs/agent-browser/skills"
+    cat > "$TEST_ROOT/upstream-coverage.json" <<'EOF'
+{
+  "repos": [
+    {
+      "repo": "vercel-labs/agent-skills",
+      "ignored": []
+    }
+  ]
+}
+EOF
+    create_mock_skill_file "$MOCK_REPOS/vercel-labs/agent-skills" "example-skill"
+    rm -rf "$MOCK_REPOS/vercel-labs/agent-skills/skills"
 
     run_sync
 
-    assert_contains "$OUTPUT_FILE" "WARN: No skills/*/SKILL.md files found in vercel-labs/agent-browser; repo layout may have changed"
-    assert_contains "$OUTPUT_FILE" "WARN: Skipping upstream repo coverage audit for vercel-labs/agent-browser"
+    assert_contains "$OUTPUT_FILE" "WARN: No skills/*/SKILL.md files found in vercel-labs/agent-skills; repo layout may have changed"
+    assert_contains "$OUTPUT_FILE" "WARN: Skipping upstream repo coverage audit for vercel-labs/agent-skills"
     assert_contains "$OUTPUT_FILE" "Done."
 }
 
@@ -489,6 +540,133 @@ EOF
     assert_log_not_contains "add|expo/skills|"
 }
 
+test_invalid_exclude_global_specs_schema_fails_fast() {
+    local local_config_file="$TEST_ROOT/.skills.local.json"
+    cat > "$local_config_file" <<'EOF'
+{
+  "excludeGlobalSpecs": {}
+}
+EOF
+
+    if run_sync_with_env LOCAL_SKILLS_CONFIG_FILE="$local_config_file"; then
+        fail "expected install script to reject invalid excludeGlobalSpecs schema"
+    fi
+
+    assert_contains "$OUTPUT_FILE" "Invalid local skills config in $local_config_file"
+    assert_log_not_contains "add|"
+    assert_log_not_contains "remove|"
+}
+
+test_invalid_exclude_global_spec_requires_explicit_skill() {
+    local local_config_file="$TEST_ROOT/.skills.local.json"
+    cat > "$local_config_file" <<'EOF'
+{
+  "excludeGlobalSpecs": [
+    "expo/skills"
+  ]
+}
+EOF
+
+    if run_sync_with_env LOCAL_SKILLS_CONFIG_FILE="$local_config_file"; then
+        fail "expected install script to reject repo-wide excludeGlobalSpecs entries"
+    fi
+
+    assert_contains "$OUTPUT_FILE" "Explicit skill spec required in $local_config_file:excludeGlobalSpecs[0]: expo/skills"
+    assert_log_not_contains "add|"
+    assert_log_not_contains "remove|"
+}
+
+test_global_exclusion_removes_curated_skill_as_stale() {
+    local local_config_file="$TEST_ROOT/.skills.local.json"
+    cat > "$local_config_file" <<'EOF'
+{
+  "excludeGlobalSpecs": [
+    "openai/skills@pdf"
+  ]
+}
+EOF
+
+    seed_state_with_all_specs
+
+    run_sync_with_env LOCAL_SKILLS_CONFIG_FILE="$local_config_file"
+
+    assert_contains "$OUTPUT_FILE" "Removing: pdf"
+    assert_log_contains "remove|pdf"
+    assert_log_not_contains "add|openai/skills|"
+}
+
+test_global_exclusion_removes_locally_added_spec() {
+    local local_config_file="$TEST_ROOT/.skills.local.json"
+    cat > "$local_config_file" <<'EOF'
+{
+  "globalSpecs": [
+    "expo/skills@building-native-ui"
+  ],
+  "excludeGlobalSpecs": [
+    "expo/skills@building-native-ui"
+  ]
+}
+EOF
+
+    seed_state_with_all_specs
+    printf '%s\n' "building-native-ui" >> "$STATE_FILE"
+
+    run_sync_with_env LOCAL_SKILLS_CONFIG_FILE="$local_config_file"
+
+    assert_contains "$OUTPUT_FILE" "Removing: building-native-ui"
+    assert_log_contains "remove|building-native-ui"
+    assert_log_not_contains "add|expo/skills|"
+}
+
+test_unknown_global_exclusion_is_noop() {
+    local local_config_file="$TEST_ROOT/.skills.local.json"
+    cat > "$local_config_file" <<'EOF'
+{
+  "excludeGlobalSpecs": [
+    "openai/skills@does-not-exist"
+  ]
+}
+EOF
+
+    seed_state_with_all_specs
+
+    run_sync_with_env LOCAL_SKILLS_CONFIG_FILE="$local_config_file"
+
+    assert_contains "$OUTPUT_FILE" "No stale skills to remove."
+    assert_log_not_contains "remove|"
+    assert_log_not_contains "add|"
+}
+
+test_empty_result_sync_is_valid() {
+    local narrow_specs_file="$TEST_ROOT/narrow-global-specs.txt"
+    local local_config_file="$TEST_ROOT/.skills.local.json"
+
+    cat > "$narrow_specs_file" <<'EOF'
+openai/skills@pdf
+EOF
+
+    cat > "$local_config_file" <<'EOF'
+{
+  "excludeGlobalSpecs": [
+    "openai/skills@pdf"
+  ]
+}
+EOF
+
+    printf '%s\n' "pdf" > "$STATE_FILE"
+
+    run_sync_with_env \
+        GLOBAL_SPECS_FILE="$narrow_specs_file" \
+        LOCAL_SKILLS_CONFIG_FILE="$local_config_file" \
+        SKILLS_AUDIT_REPO_COVERAGE=0
+
+    assert_contains "$OUTPUT_FILE" "Removing: pdf"
+    assert_contains "$OUTPUT_FILE" "No skills to add."
+    assert_contains "$OUTPUT_FILE" "Done."
+    assert_log_contains "remove|pdf"
+    assert_log_not_contains "add|"
+}
+
 run_sync_with_env() {
     (
         cd "$REPO_DIR"
@@ -509,5 +687,11 @@ run_test "batched adds by repo" test_batched_adds
 run_test "invalid global spec fails fast" test_invalid_global_spec_fails_fast
 run_test "repo-wide global spec expands to all skills" test_repo_wide_global_spec_expands_to_all_skills
 run_test "local global specs are preserved" test_local_global_specs_are_preserved
+run_test "invalid excludeGlobalSpecs schema fails fast" test_invalid_exclude_global_specs_schema_fails_fast
+run_test "excludeGlobalSpecs entries must be explicit skills" test_invalid_exclude_global_spec_requires_explicit_skill
+run_test "global exclusion removes curated skill as stale" test_global_exclusion_removes_curated_skill_as_stale
+run_test "global exclusion removes locally added spec" test_global_exclusion_removes_locally_added_spec
+run_test "unknown global exclusion is a no-op" test_unknown_global_exclusion_is_noop
+run_test "empty-result sync is valid" test_empty_result_sync_is_valid
 
 echo "PASSED: $TESTS_RUN test(s)"
