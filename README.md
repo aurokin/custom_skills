@@ -196,6 +196,11 @@ Local repo-managed skills live in `skills/<name>/SKILL.md`.
 
 Current local skills:
 - `agents-md`
+- `to-prd` — forked from `mattpocock/to-prd`
+- `to-issues` — forked from `mattpocock/to-issues`
+
+The `to-prd` and `to-issues` skills are maintained here as local forks rather
+than installed upstream packages.
 
 To add a new local skill:
 
