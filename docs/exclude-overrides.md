@@ -1,6 +1,6 @@
 # Exclude Overrides
 
-This document describes the planned user-facing behavior for exclusion
+This document describes the implemented user-facing behavior for exclusion
 overrides.
 
 `excludeGlobalSpecs` and `excludeFamilySpecs` let `.skills.local.json` subtract
@@ -24,15 +24,12 @@ Add these optional keys to `.skills.local.json`:
 
 - `excludeGlobalSpecs`
   exclusions applied to the merged global set used by
-  `install-repro-skills.sh`
+  `install-repro-skills.sh`; accepts repo-wide `owner/repo` and explicit
+  `owner/repo@skill-name` entries
 - `excludeFamilySpecs`
   exclusions keyed by curated family name, applied only to that family's merged
-  set during `deploy-project-skills.sh`
-
-Exclusions use the same spec format as the catalog:
-
-- `owner/repo`
-- `owner/repo@skill-name`
+  set during `deploy-project-skills.sh`; accepts explicit
+  `owner/repo@skill-name` entries only
 
 ## Merge Order
 
@@ -49,11 +46,14 @@ Families:
 
 1. Load curated includes for one family.
 2. Append local `familySpecs[family]`.
-3. Normalize includes to explicit `owner/repo@skill-name` specs.
+3. If exclusions are present, normalize repo-wide includes to explicit
+   `owner/repo@skill-name` specs for filtering.
 4. Load and normalize `excludeFamilySpecs[family]`.
-5. Remove excluded specs from that family's merged explicit set.
-6. Dedupe the final explicit set for that family.
-7. Merge selected families and dedupe again across the final deploy set.
+5. Remove excluded specs from that family's merged contribution.
+6. Preserve a repo-wide spec when that repo survives filtering unchanged;
+   otherwise keep only the explicit surviving specs for that repo.
+7. Dedupe the final family contribution and merge selected families into the
+   final deploy set.
 
 `exclude > include` is the precedence rule. Once a spec is excluded, it stays
 out of the final resolved set even if it was also added locally.
@@ -61,11 +61,13 @@ out of the final resolved set even if it was also added locally.
 ## Matching Rules
 
 - Matching is exact and case-sensitive after normalization.
-- Repo-wide exclusions are allowed.
+- Repo-wide exclusions are allowed in `excludeGlobalSpecs`.
+- `excludeFamilySpecs` requires explicit skill specs.
 - Repo-wide includes and excludes are both expanded to current upstream skills
-  before exclusions are applied.
+  before exclusions are applied when the workflow supports them.
 - Unknown exclusion specs are valid and silent no-ops.
 - Unknown `excludeFamilySpecs` family keys are validation errors.
+- Unknown `excludeGlobalSpecs` repo or skill names are accepted and ignored.
 
 ## Scope Rules
 
@@ -78,20 +80,37 @@ out of the final resolved set even if it was also added locally.
 - Exclusions do not remove local repo-managed skills from `skills/`.
 - `excludeFamilySpecs` only targets curated families, not `customFamilies`.
 
+## Validation Boundaries
+
+- `.skills.local.json` must remain a JSON object.
+- `excludeGlobalSpecs` must be an array of valid skill specs.
+- `excludeFamilySpecs` must be an object keyed by curated family name, and each
+  value must be an array of explicit skill specs.
+- `familySpecs` can only target curated families that exist in the catalog.
+- `customFamilies` must define a single-line `description` and at least one
+  valid spec.
+
 ## Operational Notes
 
 - Some repo-wide include and exclude cases require enumerating current upstream
   skills.
+- `install-repro-skills.sh` prints a resolved global summary from the final
+  post-exclusion explicit set before mutating installed upstream skills.
 - `deploy-project-skills.sh` also enumerates current upstream skills when it
   needs to print exact resolved repo summaries and `^` full-coverage markers,
   even when the selected family specs are already explicit.
+- `deploy-project-skills.sh` prints the final post-exclusion planned install
+  set before prompting or copying skills.
+- `^` means the final resolved set covers every currently enumerated upstream
+  skill for that repo.
 - That means deploys, including `--dry-run`, require `git` whenever exact
   summary coverage cannot be determined from already-cached enumeration data.
 - If required upstream enumeration fails, the command fails rather than
   guessing.
 - Empty results are valid:
   global sync may resolve to zero upstream-managed globals, and family deploy
-  may resolve to zero skills after exclusions.
+  may resolve to zero skills after exclusions. In those cases the summary
+  prints `(none)` and the command continues successfully.
 
 ## Examples
 
@@ -161,13 +180,35 @@ Repo-wide exclusion:
 Result: every current upstream skill from `steipete/clawdis` is removed from the
 resolved global set.
 
+Empty-result global sync is valid:
+
+```json
+{
+  "excludeGlobalSpecs": [
+    "openai/skills@pdf"
+  ]
+}
+```
+
+Result: if `pdf` was the only resolved upstream-managed global skill, sync
+removes it as stale, prints a resolved summary of `(none)`, and completes
+without treating the empty result as an error.
+
 Empty-result deploy is valid:
 
 ```json
 {
   "excludeFamilySpecs": {
     "expo": [
-      "expo/skills"
+      "expo/skills@building-native-ui",
+      "expo/skills@expo-api-routes",
+      "expo/skills@expo-cicd-workflows",
+      "expo/skills@expo-deployment",
+      "expo/skills@expo-dev-client",
+      "expo/skills@expo-tailwind-setup",
+      "expo/skills@native-data-fetching",
+      "expo/skills@upgrading-expo",
+      "expo/skills@use-dom"
     ]
   }
 }

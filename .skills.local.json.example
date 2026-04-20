@@ -2,9 +2,18 @@
   "globalSpecs": [
     "owner/repo@my-global-skill"
   ],
+  "excludeGlobalSpecs": [
+    "owner/repo@skill-to-exclude",
+    "owner/another-repo"
+  ],
   "familySpecs": {
     "expo": [
       "owner/repo@my-expo-skill"
+    ]
+  },
+  "excludeFamilySpecs": {
+    "expo": [
+      "owner/repo@family-skill-to-exclude"
     ]
   },
   "customFamilies": {

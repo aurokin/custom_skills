@@ -34,16 +34,15 @@ It will:
 Use it when you want to update your personal baseline skill environment.
 
 If `.skills.local.json` exists, its `globalSpecs` are merged into the desired
-global set and its `excludeGlobalSpecs` remove explicit upstream skills from
-that resolved global set before stale-skill removal runs.
+global set and its `excludeGlobalSpecs` remove explicit upstream skills, or
+whole upstream repos after normalization, from that resolved global set before
+stale-skill removal runs.
 
-Planned exclusion-override behavior and planned resolved summary output are
-documented in
-[docs/exclude-overrides.md](/home/auro/code/custom_skills/docs/exclude-overrides.md:1)
-and
-[docs/exclude-overrides-plan.md](/home/auro/code/custom_skills/docs/exclude-overrides-plan.md:1).
-The planned summary marker is `^`, meaning the final resolved set covers all
-current upstream skills for that repo.
+Exclusion-override behavior, resolved repo summaries, and the `^` full-coverage
+marker are documented in [docs/exclude-overrides.md](docs/exclude-overrides.md)
+and [docs/exclude-overrides-plan.md](docs/exclude-overrides-plan.md). The `^`
+marker means the final resolved set covers all current upstream skills for that
+repo.
 
 Examples:
 
@@ -74,13 +73,15 @@ Behavior:
 - requires `git` whenever upstream enumeration is needed for deploy planning, resolved summaries, or coverage-driven full-coverage markers
 - as a result, `--dry-run` also requires `git` when the printed summary needs exact upstream coverage information
 
-Planned exclusion-override behavior and planned resolved summary output are
-documented in
-[docs/exclude-overrides.md](/home/auro/code/custom_skills/docs/exclude-overrides.md:1)
-and
-[docs/exclude-overrides-plan.md](/home/auro/code/custom_skills/docs/exclude-overrides-plan.md:1).
-The planned summary marker is `^`, meaning the final resolved set covers all
-current upstream skills for that repo.
+If `.skills.local.json` exists, its `familySpecs` extend curated families and
+its `excludeFamilySpecs` remove explicit upstream skills from each curated
+family's resolved contribution before the selected families are merged.
+
+Exclusion-override behavior, resolved repo summaries, and the `^` full-coverage
+marker are documented in [docs/exclude-overrides.md](docs/exclude-overrides.md)
+and [docs/exclude-overrides-plan.md](docs/exclude-overrides-plan.md). The `^`
+marker means the final resolved set covers all current upstream skills for that
+repo.
 
 Interactive mode:
 
@@ -155,15 +156,18 @@ Supported keys:
 - `globalSpecs`
   additive upstream specs merged into `install-repro-skills.sh`
 - `excludeGlobalSpecs`
-  explicit upstream specs removed from the resolved global install set
+  upstream specs removed from the resolved global install set
 - `familySpecs`
   additive specs keyed by existing curated family name
+- `excludeFamilySpecs`
+  explicit upstream specs removed from a curated family's resolved deploy set
 - `customFamilies`
   new family definitions with `description` and `specs`
 
-See [docs/exclude-overrides.md](/home/auro/code/custom_skills/docs/exclude-overrides.md:1)
-for the planned exclusion-override semantics, normalization rules, and
-examples.
+See [docs/exclude-overrides.md](docs/exclude-overrides.md) for the implemented
+exclusion-override semantics, normalization rules, resolved summary output, and
+examples. See [docs/exclude-overrides-plan.md](docs/exclude-overrides-plan.md)
+for the implementation shape and test scope that back those behaviors.
 
 Example:
 
@@ -173,11 +177,17 @@ Example:
     "owner/repo@my-global-skill"
   ],
   "excludeGlobalSpecs": [
-    "openai/skills@pdf"
+    "owner/repo@skill-to-exclude",
+    "owner/another-repo"
   ],
   "familySpecs": {
     "expo": [
       "owner/repo@my-expo-skill"
+    ]
+  },
+  "excludeFamilySpecs": {
+    "expo": [
+      "owner/repo@family-skill-to-exclude"
     ]
   },
   "customFamilies": {
@@ -193,8 +203,10 @@ Example:
 
 Rules:
 
-- `excludeGlobalSpecs` only accepts explicit `owner/repo@skill-name` entries
+- `excludeGlobalSpecs` accepts repo-wide `owner/repo` and explicit `owner/repo@skill-name` entries
+- `excludeFamilySpecs` only accepts explicit `owner/repo@skill-name` entries
 - `familySpecs` can only target existing curated families
+- `excludeFamilySpecs` can only target existing curated families
 - `customFamilies` cannot reuse a curated family name
 - duplicate specs are deduped with curated entries first
 
