@@ -454,6 +454,72 @@ build_repo_batches() {
     done
 }
 
+append_specs_to_repo_skill_map() {
+    local specs_name="$1"
+    local target_name="$2"
+    local -n specs_ref="$specs_name"
+    local -n target_ref="$target_name"
+    local spec repo skill_name
+
+    for spec in "${specs_ref[@]}"; do
+        repo="$(spec_repo "$spec")"
+        skill_name="$(spec_skill "$spec")"
+        if [ -z "$skill_name" ]; then
+            continue
+        fi
+        if [[ -z "${target_ref[$repo]:-}" ]]; then
+            target_ref["$repo"]="$skill_name"
+        else
+            target_ref["$repo"]+=" $skill_name"
+        fi
+    done
+}
+
+collect_effective_family_excluded_specs() {
+    local family_names_name="$1"
+    local final_specs_name="$2"
+    local target_name="$3"
+    local -n family_names_ref="$family_names_name"
+    local -n final_specs_ref="$final_specs_name"
+    local -n target_ref="$target_name"
+    local family_name
+    local family_excluded_specs=()
+    local spec repo
+    local -A final_explicit_lookup=()
+    local -A final_repo_install_all=()
+
+    target_ref=()
+
+    for spec in "${final_specs_ref[@]}"; do
+        repo="$(spec_repo "$spec")"
+        if spec_has_explicit_skill "$spec"; then
+            final_explicit_lookup["$spec"]=1
+        else
+            final_repo_install_all["$repo"]=1
+        fi
+    done
+
+    for family_name in "${family_names_ref[@]}"; do
+        if ! curated_family_exists "$family_name"; then
+            continue
+        fi
+
+        load_local_family_exclude_specs "$family_name" family_excluded_specs || return 1
+        for spec in "${family_excluded_specs[@]}"; do
+            repo="$(spec_repo "$spec")"
+            if [[ -n "${final_repo_install_all[$repo]:-}" ]]; then
+                continue
+            fi
+            if [[ -n "${final_explicit_lookup[$spec]:-}" ]]; then
+                continue
+            fi
+            target_ref+=("$spec")
+        done
+    done
+
+    dedupe_array "$target_name"
+}
+
 main() {
     local target_dir=""
     local agents_string="$DEFAULT_SKILLS_AGENTS"
@@ -596,6 +662,9 @@ main() {
     local specs=()
     load_deploy_specs_for_families families specs
 
+    local excluded_specs=()
+    collect_effective_family_excluded_specs families specs excluded_specs || exit 1
+
     local -A declared_by_repo=()
     local spec repo skill_name
     for spec in "${specs[@]}"; do
@@ -625,6 +694,7 @@ main() {
             warn "Skipping family repo coverage audit because manifest is invalid: $FAMILY_UPSTREAM_COVERAGE_FILE"
         fi
     fi
+    append_specs_to_repo_skill_map excluded_specs ignored_by_repo
 
     local repo_order=()
     local -A specs_by_repo=()

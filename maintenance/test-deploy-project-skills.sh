@@ -1018,6 +1018,37 @@ test_family_audit_warning_nonfatal() {
     assert_log_contains "add|expo/skills|"
 }
 
+test_family_exclusion_is_ignored_in_repo_coverage_audit() {
+    local local_config_file="$TEST_ROOT/.skills.local.json"
+
+    cat > "$local_config_file" <<'EOF'
+{
+  "excludeFamilySpecs": {
+    "expo": [
+      "expo/skills@expo-cicd-workflows"
+    ]
+  }
+}
+EOF
+
+    (
+        cd "$REPO_DIR"
+        PATH="$TEST_ROOT/bin:$ORIGINAL_PATH" \
+        LOCAL_SKILLS_CONFIG_FILE="$local_config_file" \
+        SKILLS_BIN="$TEST_ROOT/bin/skills" \
+        FAMILY_UPSTREAM_COVERAGE_FILE="$FAMILY_MANIFEST_FILE" \
+        "$DEPLOY_SCRIPT" \
+            --target "$PLAIN_TARGET" \
+            --family expo \
+            --yes
+    ) > "$OUTPUT_FILE" 2>&1
+
+    assert_contains "$OUTPUT_FILE" "Auditing curated family repos..."
+    assert_not_contains "$OUTPUT_FILE" "WARN: Undeclared upstream skill(s) in expo/skills:"
+    assert_contains "$OUTPUT_FILE" "Done."
+    assert_log_contains "add|expo/skills|agents=codex opencode gemini-cli github-copilot claude-code|skills=building-native-ui expo-api-routes expo-deployment expo-dev-client expo-tailwind-setup native-data-fetching upgrading-expo use-dom|copy=1|yes=1"
+}
+
 test_dry_run_skips_audit_and_install() {
     create_mock_skill_file "$MOCK_REPOS/expo/skills" "newly-added-skill"
 
@@ -1095,6 +1126,7 @@ run_test "custom local family lists and deploys" test_custom_local_family_lists_
 run_test "custom local family rejects empty specs" test_custom_local_family_rejects_empty_specs
 run_test "custom local family rejects multiline description" test_custom_local_family_rejects_multiline_description
 run_test "family audit warning is non-fatal" test_family_audit_warning_nonfatal
+run_test "family exclusion is ignored in repo coverage audit" test_family_exclusion_is_ignored_in_repo_coverage_audit
 run_test "dry run skips audit and install" test_dry_run_skips_audit_and_install
 run_test "invalid catalog spec fails fast" test_invalid_catalog_spec_fails_fast
 
