@@ -43,7 +43,7 @@ expand_full_repo_specs() {
             exit 1
         fi
 
-        if ! upstream_skill_names="$(collect_upstream_skill_names "$repo" | sort -u)"; then
+        if ! collect_upstream_skill_names_cached "$repo" upstream_skill_names; then
             echo "Failed to expand repo-wide skill spec: $repo" >&2
             exit 1
         fi
@@ -76,6 +76,46 @@ filter_excluded_specs() {
         fi
         target_ref+=("$spec")
     done
+}
+
+resolve_excluded_specs() {
+    local excludes_name="$1"
+    local available_name="$2"
+    local target_name="$3"
+    local -n excludes_ref="$excludes_name"
+    local -n available_ref="$available_name"
+    local -n target_ref="$target_name"
+    local spec repo available_spec
+    local -A available_by_repo=()
+
+    target_ref=()
+    for spec in "${available_ref[@]}"; do
+        repo="$(spec_repo "$spec")"
+        if [[ -z "${available_by_repo[$repo]:-}" ]]; then
+            available_by_repo["$repo"]="$spec"
+        else
+            available_by_repo["$repo"]+=$'\n'"$spec"
+        fi
+    done
+
+    for spec in "${excludes_ref[@]}"; do
+        if spec_has_explicit_skill "$spec"; then
+            target_ref+=("$spec")
+            continue
+        fi
+
+        repo="$(spec_repo "$spec")"
+        if [[ -z "${available_by_repo[$repo]:-}" ]]; then
+            continue
+        fi
+
+        while IFS= read -r available_spec; do
+            [ -z "$available_spec" ] && continue
+            target_ref+=("$available_spec")
+        done <<< "${available_by_repo[$repo]}"
+    done
+
+    dedupe_array "$target_name"
 }
 
 append_specs_to_repo_skill_map() {
@@ -121,8 +161,11 @@ main() {
     local excluded_specs=()
     load_local_global_exclude_specs excluded_specs || return 1
 
+    local resolved_excluded_specs=()
+    resolve_excluded_specs excluded_specs expanded_specs resolved_excluded_specs
+
     local desired_specs=()
-    filter_excluded_specs expanded_specs excluded_specs desired_specs
+    filter_excluded_specs expanded_specs resolved_excluded_specs desired_specs
 
     echo "Syncing global skills for agents: ${skills_agents[*]}"
 
@@ -149,7 +192,7 @@ main() {
             fi
         fi
     fi
-    append_specs_to_repo_skill_map excluded_specs ignored_by_repo
+    append_specs_to_repo_skill_map resolved_excluded_specs ignored_by_repo
 
     # Get currently installed global skill names (only ~/.agents/skills/).
     # The skills CLI ignores symlinks, so locally-linked skills from

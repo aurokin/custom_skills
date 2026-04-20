@@ -209,7 +209,7 @@ ensure_local_skills_config_valid() {
 
     while IFS=$'\t' read -r field_name spec; do
         [ -z "$field_name" ] && continue
-        validate_explicit_spec_line "$spec" "$config_file" "$field_name" || return 2
+        validate_spec_line "$spec" "$config_file" "$field_name" || return 2
     done < <(jq -r '
         (.excludeGlobalSpecs // [])
         | to_entries[]

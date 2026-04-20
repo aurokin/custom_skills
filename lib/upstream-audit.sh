@@ -4,6 +4,9 @@ audit_warn() {
     echo "WARN: $*" >&2
 }
 
+declare -gA UPSTREAM_SKILL_NAME_CACHE=()
+declare -gA UPSTREAM_SKILL_CACHE_STATUS=()
+
 load_upstream_coverage_manifest() {
     local manifest_file="$1"
 
@@ -91,6 +94,41 @@ collect_upstream_skill_names() {
     rm -rf "$tmp_dir"
 }
 
+collect_upstream_skill_names_cached() {
+    local repo="$1"
+    local target_name="${2:-}"
+    local cached_output
+
+    if [[ -n "${UPSTREAM_SKILL_CACHE_STATUS[$repo]:-}" ]]; then
+        if [ "${UPSTREAM_SKILL_CACHE_STATUS[$repo]}" -eq 0 ]; then
+            cached_output="${UPSTREAM_SKILL_NAME_CACHE[$repo]}"
+            if [ -n "$target_name" ]; then
+                local -n target_ref="$target_name"
+                target_ref="$cached_output"
+            elif [ -n "$cached_output" ]; then
+                printf '%s\n' "$cached_output"
+            fi
+            return 0
+        fi
+        return 1
+    fi
+
+    if ! cached_output="$(collect_upstream_skill_names "$repo" | sort -u)"; then
+        UPSTREAM_SKILL_CACHE_STATUS["$repo"]=1
+        return 1
+    fi
+
+    UPSTREAM_SKILL_NAME_CACHE["$repo"]="$cached_output"
+    UPSTREAM_SKILL_CACHE_STATUS["$repo"]=0
+
+    if [ -n "$target_name" ]; then
+        local -n target_ref="$target_name"
+        target_ref="$cached_output"
+    elif [ -n "$cached_output" ]; then
+        printf '%s\n' "$cached_output"
+    fi
+}
+
 audit_repo_skill_coverage() {
     local repo="$1"
     local declared_list="$2"
@@ -110,7 +148,7 @@ audit_repo_skill_coverage() {
         ignored_names["$name"]=1
     done
 
-    if ! upstream_output="$(collect_upstream_skill_names "$repo" | sort -u)"; then
+    if ! collect_upstream_skill_names_cached "$repo" upstream_output; then
         return 1
     fi
 

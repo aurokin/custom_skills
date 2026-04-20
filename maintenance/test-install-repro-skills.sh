@@ -557,23 +557,181 @@ EOF
     assert_log_not_contains "remove|"
 }
 
-test_invalid_exclude_global_spec_requires_explicit_skill() {
+test_repo_wide_global_include_supports_targeted_explicit_exclude() {
     local local_config_file="$TEST_ROOT/.skills.local.json"
+    local wide_specs_file="$TEST_ROOT/wide-global-specs.txt"
+
+    cat > "$wide_specs_file" <<'EOF'
+vercel-labs/agent-browser
+EOF
+
     cat > "$local_config_file" <<'EOF'
 {
   "excludeGlobalSpecs": [
-    "expo/skills"
+    "vercel-labs/agent-browser@slack"
   ]
 }
 EOF
 
-    if run_sync_with_env LOCAL_SKILLS_CONFIG_FILE="$local_config_file"; then
-        fail "expected install script to reject repo-wide excludeGlobalSpecs entries"
-    fi
+    run_sync_with_env \
+        GLOBAL_SPECS_FILE="$wide_specs_file" \
+        LOCAL_SKILLS_CONFIG_FILE="$local_config_file" \
+        SKILLS_AUDIT_REPO_COVERAGE=0
 
-    assert_contains "$OUTPUT_FILE" "Explicit skill spec required in $local_config_file:excludeGlobalSpecs[0]: expo/skills"
+    assert_contains "$OUTPUT_FILE" "No stale skills to remove."
+    assert_log_count 1 "add|vercel-labs/agent-browser|"
+    assert_log_contains "add|vercel-labs/agent-browser|agent-browser agentcore dogfood electron vercel-sandbox"
+    assert_log_not_contains "add|vercel-labs/agent-browser|agent-browser agentcore dogfood electron slack vercel-sandbox"
+}
+
+test_repo_wide_global_exclusion_removes_entire_repo() {
+    local local_config_file="$TEST_ROOT/.skills.local.json"
+    local wide_specs_file="$TEST_ROOT/wide-global-specs.txt"
+
+    cat > "$wide_specs_file" <<'EOF'
+vercel-labs/agent-browser
+EOF
+
+    cat > "$local_config_file" <<'EOF'
+{
+  "excludeGlobalSpecs": [
+    "vercel-labs/agent-browser"
+  ]
+}
+EOF
+
+    printf '%s\n' \
+        "agent-browser" \
+        "agentcore" \
+        "dogfood" \
+        "electron" \
+        "slack" \
+        "vercel-sandbox" > "$STATE_FILE"
+
+    run_sync_with_env \
+        GLOBAL_SPECS_FILE="$wide_specs_file" \
+        LOCAL_SKILLS_CONFIG_FILE="$local_config_file" \
+        SKILLS_AUDIT_REPO_COVERAGE=0
+
+    assert_contains "$OUTPUT_FILE" "Removing: agent-browser"
+    assert_contains "$OUTPUT_FILE" "Removing: agentcore"
+    assert_contains "$OUTPUT_FILE" "Removing: dogfood"
+    assert_contains "$OUTPUT_FILE" "Removing: electron"
+    assert_contains "$OUTPUT_FILE" "Removing: slack"
+    assert_contains "$OUTPUT_FILE" "Removing: vercel-sandbox"
+    assert_contains "$OUTPUT_FILE" "No skills to add."
+    assert_contains "$OUTPUT_FILE" "Done."
+    assert_log_contains "remove|agent-browser"
+    assert_log_contains "remove|agentcore"
+    assert_log_contains "remove|dogfood"
+    assert_log_contains "remove|electron"
+    assert_log_contains "remove|slack"
+    assert_log_contains "remove|vercel-sandbox"
+    assert_log_not_contains "add|"
+}
+
+test_repo_wide_global_exclusion_over_explicit_specs_skips_enumeration() {
+    local narrow_specs_file="$TEST_ROOT/narrow-global-specs.txt"
+    local local_config_file="$TEST_ROOT/.skills.local.json"
+
+    cat > "$narrow_specs_file" <<'EOF'
+openai/skills@pdf
+openai/skills@screenshot
+EOF
+
+    cat > "$local_config_file" <<'EOF'
+{
+  "excludeGlobalSpecs": [
+    "openai/skills"
+  ]
+}
+EOF
+
+    printf '%s\n' "pdf" "screenshot" > "$STATE_FILE"
+    export FAKE_GIT_FAIL_REPOS="openai/skills"
+
+    run_sync_with_env \
+        GLOBAL_SPECS_FILE="$narrow_specs_file" \
+        LOCAL_SKILLS_CONFIG_FILE="$local_config_file" \
+        SKILLS_AUDIT_REPO_COVERAGE=0
+
+    assert_contains "$OUTPUT_FILE" "Removing: pdf"
+    assert_contains "$OUTPUT_FILE" "Removing: screenshot"
+    assert_contains "$OUTPUT_FILE" "No skills to add."
+    assert_contains "$OUTPUT_FILE" "Done."
+    assert_log_contains "remove|pdf"
+    assert_log_contains "remove|screenshot"
+    assert_log_not_contains "add|"
+    if [ -s "$GIT_LOG_FILE" ]; then
+        echo "--- $GIT_LOG_FILE ---" >&2
+        cat "$GIT_LOG_FILE" >&2
+        echo "--------------------" >&2
+        fail "expected repo-wide exclusion over explicit specs to skip git enumeration"
+    fi
+}
+
+test_stale_repo_wide_global_exclusion_is_noop() {
+    local narrow_specs_file="$TEST_ROOT/narrow-global-specs.txt"
+    local local_config_file="$TEST_ROOT/.skills.local.json"
+
+    cat > "$narrow_specs_file" <<'EOF'
+openai/skills@pdf
+EOF
+
+    cat > "$local_config_file" <<'EOF'
+{
+  "excludeGlobalSpecs": [
+    "typo/repo"
+  ]
+}
+EOF
+
+    printf '%s\n' "pdf" > "$STATE_FILE"
+
+    run_sync_with_env \
+        GLOBAL_SPECS_FILE="$narrow_specs_file" \
+        LOCAL_SKILLS_CONFIG_FILE="$local_config_file" \
+        SKILLS_AUDIT_REPO_COVERAGE=0
+
+    assert_contains "$OUTPUT_FILE" "No stale skills to remove."
+    assert_contains "$OUTPUT_FILE" "No skills to add."
+    assert_contains "$OUTPUT_FILE" "Done."
     assert_log_not_contains "add|"
     assert_log_not_contains "remove|"
+    if [ -s "$GIT_LOG_FILE" ]; then
+        echo "--- $GIT_LOG_FILE ---" >&2
+        cat "$GIT_LOG_FILE" >&2
+        echo "--------------------" >&2
+        fail "expected stale repo-wide exclusion to skip git enumeration"
+    fi
+}
+
+test_repo_wide_global_expansion_reuses_upstream_enumeration() {
+    local wide_specs_file="$TEST_ROOT/wide-global-specs.txt"
+
+    cat > "$wide_specs_file" <<'EOF'
+vercel-labs/agent-browser
+EOF
+
+    cat > "$TEST_ROOT/upstream-coverage.json" <<'EOF'
+{
+  "repos": [
+    {
+      "repo": "vercel-labs/agent-browser",
+      "ignored": []
+    }
+  ]
+}
+EOF
+
+    run_sync_with_env GLOBAL_SPECS_FILE="$wide_specs_file"
+
+    if [ "$(grep -Fc "git|clone --depth 1 https://github.com/vercel-labs/agent-browser.git" "$GIT_LOG_FILE")" -ne 1 ]; then
+        echo "--- $GIT_LOG_FILE ---" >&2
+        cat "$GIT_LOG_FILE" >&2
+        echo "--------------------" >&2
+        fail "expected repo-wide normalization and coverage audit to reuse one upstream clone"
+    fi
 }
 
 test_global_exclusion_removes_curated_skill_as_stale() {
@@ -728,7 +886,11 @@ run_test "invalid global spec fails fast" test_invalid_global_spec_fails_fast
 run_test "repo-wide global spec expands to all skills" test_repo_wide_global_spec_expands_to_all_skills
 run_test "local global specs are preserved" test_local_global_specs_are_preserved
 run_test "invalid excludeGlobalSpecs schema fails fast" test_invalid_exclude_global_specs_schema_fails_fast
-run_test "excludeGlobalSpecs entries must be explicit skills" test_invalid_exclude_global_spec_requires_explicit_skill
+run_test "repo-wide global include supports targeted explicit exclude" test_repo_wide_global_include_supports_targeted_explicit_exclude
+run_test "repo-wide global exclusion removes entire repo" test_repo_wide_global_exclusion_removes_entire_repo
+run_test "repo-wide global exclusion over explicit specs skips enumeration" test_repo_wide_global_exclusion_over_explicit_specs_skips_enumeration
+run_test "stale repo-wide global exclusion is a no-op" test_stale_repo_wide_global_exclusion_is_noop
+run_test "repo-wide global expansion reuses upstream enumeration" test_repo_wide_global_expansion_reuses_upstream_enumeration
 run_test "global exclusion removes curated skill as stale" test_global_exclusion_removes_curated_skill_as_stale
 run_test "global exclusion removes locally added spec" test_global_exclusion_removes_locally_added_spec
 run_test "unknown global exclusion is a no-op" test_unknown_global_exclusion_is_noop
