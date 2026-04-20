@@ -194,6 +194,11 @@ main() {
     fi
     append_specs_to_repo_skill_map resolved_excluded_specs ignored_by_repo
 
+    # Resolve the exact summary before mutating global installs so any
+    # enumeration failure happens before stale removals or new installs.
+    echo ""
+    print_resolved_repo_skill_summary "Resolved global skill summary:" desired_specs
+
     # Get currently installed global skill names (only ~/.agents/skills/).
     # The skills CLI ignores symlinks, so locally-linked skills from
     # link-skills.sh are naturally excluded.

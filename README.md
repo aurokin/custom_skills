@@ -71,6 +71,8 @@ Behavior:
 - installs only the selected families
 - does not normalize or remove unrelated project skills
 - audits selected curated family repos for upstream drift when coverage manifests are configured
+- requires `git` whenever upstream enumeration is needed for deploy planning, resolved summaries, or coverage-driven full-coverage markers
+- as a result, `--dry-run` also requires `git` when the printed summary needs exact upstream coverage information
 
 Planned exclusion-override behavior and planned resolved summary output are
 documented in

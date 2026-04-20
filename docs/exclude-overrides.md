@@ -82,6 +82,11 @@ out of the final resolved set even if it was also added locally.
 
 - Some repo-wide include and exclude cases require enumerating current upstream
   skills.
+- `deploy-project-skills.sh` also enumerates current upstream skills when it
+  needs to print exact resolved repo summaries and `^` full-coverage markers,
+  even when the selected family specs are already explicit.
+- That means deploys, including `--dry-run`, require `git` whenever exact
+  summary coverage cannot be determined from already-cached enumeration data.
 - If required upstream enumeration fails, the command fails rather than
   guessing.
 - Empty results are valid:

@@ -37,6 +37,23 @@ assert_not_contains() {
     fi
 }
 
+assert_line_order() {
+    local file="$1"
+    local first="$2"
+    local second="$3"
+    local first_line second_line
+
+    first_line="$(grep -Fn -- "$first" "$file" | head -n 1 | cut -d: -f1 || true)"
+    second_line="$(grep -Fn -- "$second" "$file" | head -n 1 | cut -d: -f1 || true)"
+
+    if [ -z "$first_line" ] || [ -z "$second_line" ] || [ "$first_line" -ge "$second_line" ]; then
+        echo "--- $file ---" >&2
+        cat "$file" >&2
+        echo "------------" >&2
+        fail "expected '$first' to appear before '$second'"
+    fi
+}
+
 assert_not_exists() {
     local path="$1"
     if [ -e "$path" ] || [ -L "$path" ]; then
@@ -130,8 +147,38 @@ EOF
 
 seed_default_mock_repos() {
     local agent_browser_root="$MOCK_REPOS/vercel-labs/agent-browser"
+    local anthropics_skills_root="$MOCK_REPOS/anthropics/skills"
+    local openai_skills_root="$MOCK_REPOS/openai/skills"
+    local clawdis_root="$MOCK_REPOS/steipete/clawdis"
+    local openclaw_root="$MOCK_REPOS/openclaw/openclaw"
+    local agent_skills_root="$MOCK_REPOS/vercel-labs/agent-skills"
+    local vercel_skills_root="$MOCK_REPOS/vercel-labs/skills"
+    local raindrop_root="$MOCK_REPOS/dedene/raindrop-cli"
+    local matt_root="$MOCK_REPOS/mattpocock/skills"
 
-    mkdir -p "$agent_browser_root"
+    mkdir -p \
+        "$agent_browser_root" \
+        "$anthropics_skills_root" \
+        "$openai_skills_root" \
+        "$clawdis_root" \
+        "$openclaw_root" \
+        "$agent_skills_root" \
+        "$vercel_skills_root" \
+        "$raindrop_root" \
+        "$matt_root"
+
+    create_mock_skill_file "$anthropics_skills_root" "frontend-design"
+    create_mock_skill_file "$anthropics_skills_root" "webapp-testing"
+
+    create_mock_skill_file "$openai_skills_root" "openai-docs"
+    create_mock_skill_file "$openai_skills_root" "pdf"
+    create_mock_skill_file "$openai_skills_root" "screenshot"
+    create_mock_skill_file "$openai_skills_root" "security-best-practices"
+    create_mock_skill_file "$openai_skills_root" "skill-creator"
+    create_mock_skill_file "$openai_skills_root" "spreadsheet"
+
+    create_mock_skill_file "$clawdis_root" "github"
+    create_mock_skill_file "$openclaw_root" "tmux"
 
     create_mock_skill_file "$agent_browser_root" "agent-browser"
     create_mock_skill_file "$agent_browser_root" "agentcore"
@@ -139,6 +186,15 @@ seed_default_mock_repos() {
     create_mock_skill_file "$agent_browser_root" "electron"
     create_mock_skill_file "$agent_browser_root" "slack"
     create_mock_skill_file "$agent_browser_root" "vercel-sandbox"
+
+    create_mock_skill_file "$agent_skills_root" "vercel-composition-patterns"
+    create_mock_skill_file "$agent_skills_root" "vercel-react-best-practices"
+    create_mock_skill_file "$agent_skills_root" "vercel-react-native-skills"
+    create_mock_skill_file "$agent_skills_root" "web-design-guidelines"
+
+    create_mock_skill_file "$vercel_skills_root" "find-skills"
+    create_mock_skill_file "$raindrop_root" "raindrop-cli"
+    create_mock_skill_file "$matt_root" "grill-me"
 }
 
 write_fake_skills_cli() {
@@ -439,17 +495,17 @@ test_audit_clone_failure_nonfatal() {
 {
   "repos": [
     {
-      "repo": "vercel-labs/agent-skills",
+      "repo": "acme/audit-only",
       "ignored": []
     }
   ]
 }
 EOF
-    export FAKE_GIT_FAIL_REPOS="vercel-labs/agent-skills"
+    export FAKE_GIT_FAIL_REPOS="acme/audit-only"
 
     run_sync
 
-    assert_contains "$OUTPUT_FILE" "WARN: Skipping upstream repo coverage audit for vercel-labs/agent-skills"
+    assert_contains "$OUTPUT_FILE" "WARN: Skipping upstream repo coverage audit for acme/audit-only"
     assert_contains "$OUTPUT_FILE" "Done."
 }
 
@@ -459,19 +515,19 @@ test_layout_drift_warning_nonfatal() {
 {
   "repos": [
     {
-      "repo": "vercel-labs/agent-skills",
+      "repo": "acme/audit-only",
       "ignored": []
     }
   ]
 }
 EOF
-    create_mock_skill_file "$MOCK_REPOS/vercel-labs/agent-skills" "example-skill"
-    rm -rf "$MOCK_REPOS/vercel-labs/agent-skills/skills"
+    create_mock_skill_file "$MOCK_REPOS/acme/audit-only" "example-skill"
+    rm -rf "$MOCK_REPOS/acme/audit-only/skills"
 
     run_sync
 
-    assert_contains "$OUTPUT_FILE" "WARN: No skills/*/SKILL.md files found in vercel-labs/agent-skills; repo layout may have changed"
-    assert_contains "$OUTPUT_FILE" "WARN: Skipping upstream repo coverage audit for vercel-labs/agent-skills"
+    assert_contains "$OUTPUT_FILE" "WARN: No skills/*/SKILL.md files found in acme/audit-only; repo layout may have changed"
+    assert_contains "$OUTPUT_FILE" "WARN: Skipping upstream repo coverage audit for acme/audit-only"
     assert_contains "$OUTPUT_FILE" "Done."
 }
 
@@ -673,6 +729,10 @@ EOF
 test_stale_repo_wide_global_exclusion_is_noop() {
     local narrow_specs_file="$TEST_ROOT/narrow-global-specs.txt"
     local local_config_file="$TEST_ROOT/.skills.local.json"
+    local openai_skills_root="$MOCK_REPOS/openai/skills"
+
+    mkdir -p "$openai_skills_root"
+    create_mock_skill_file "$openai_skills_root" "pdf"
 
     cat > "$narrow_specs_file" <<'EOF'
 openai/skills@pdf
@@ -698,11 +758,11 @@ EOF
     assert_contains "$OUTPUT_FILE" "Done."
     assert_log_not_contains "add|"
     assert_log_not_contains "remove|"
-    if [ -s "$GIT_LOG_FILE" ]; then
+    if [ "$(grep -Fc "git|clone --depth 1 https://github.com/openai/skills.git" "$GIT_LOG_FILE")" -ne 1 ]; then
         echo "--- $GIT_LOG_FILE ---" >&2
         cat "$GIT_LOG_FILE" >&2
         echo "--------------------" >&2
-        fail "expected stale repo-wide exclusion to skip git enumeration"
+        fail "expected exact summary to enumerate openai/skills once"
     fi
 }
 
@@ -732,6 +792,76 @@ EOF
         echo "--------------------" >&2
         fail "expected repo-wide normalization and coverage audit to reuse one upstream clone"
     fi
+}
+
+test_resolved_global_summary_is_sorted_and_marks_full_coverage() {
+    local summary_specs_file="$TEST_ROOT/summary-global-specs.txt"
+    local openai_skills_root="$MOCK_REPOS/openai/skills"
+
+    mkdir -p "$openai_skills_root"
+    create_mock_skill_file "$openai_skills_root" "pdf"
+
+    cat > "$summary_specs_file" <<'EOF'
+vercel-labs/agent-browser
+openai/skills@pdf
+EOF
+
+    run_sync_with_env \
+        GLOBAL_SPECS_FILE="$summary_specs_file" \
+        SKILLS_AUDIT_REPO_COVERAGE=0
+
+    assert_contains "$OUTPUT_FILE" "Resolved global skill summary:"
+    assert_contains "$OUTPUT_FILE" "  openai/skills: pdf"
+    assert_contains "$OUTPUT_FILE" "  vercel-labs/agent-browser^: agent-browser agentcore dogfood electron slack vercel-sandbox"
+    assert_contains "$OUTPUT_FILE" "  ^ full upstream coverage for this repo"
+    assert_line_order \
+        "$OUTPUT_FILE" \
+        "  openai/skills: pdf" \
+        "  vercel-labs/agent-browser^: agent-browser agentcore dogfood electron slack vercel-sandbox"
+}
+
+test_explicit_global_summary_marks_full_coverage() {
+    local summary_specs_file="$TEST_ROOT/explicit-summary-global-specs.txt"
+    local explicit_repo_root="$MOCK_REPOS/acme/pdf-tools"
+
+    mkdir -p "$explicit_repo_root"
+    create_mock_skill_file "$explicit_repo_root" "pdf"
+
+    cat > "$summary_specs_file" <<'EOF'
+acme/pdf-tools@pdf
+EOF
+
+    run_sync_with_env \
+        GLOBAL_SPECS_FILE="$summary_specs_file" \
+        SKILLS_AUDIT_REPO_COVERAGE=0
+
+    assert_contains "$OUTPUT_FILE" "Resolved global skill summary:"
+    assert_contains "$OUTPUT_FILE" "  acme/pdf-tools^: pdf"
+    assert_contains "$OUTPUT_FILE" "  ^ full upstream coverage for this repo"
+}
+
+test_summary_failure_happens_before_mutation() {
+    local summary_specs_file="$TEST_ROOT/failing-summary-global-specs.txt"
+
+    cat > "$summary_specs_file" <<'EOF'
+acme/pdf-tools@pdf
+EOF
+
+    printf '%s\n' "rogue-skill" > "$STATE_FILE"
+    export FAKE_GIT_FAIL_REPOS="acme/pdf-tools"
+
+    if run_sync_with_env \
+        GLOBAL_SPECS_FILE="$summary_specs_file" \
+        SKILLS_AUDIT_REPO_COVERAGE=0; then
+        fail "expected explicit-only summary failure to abort sync"
+    fi
+
+    assert_contains "$OUTPUT_FILE" "Failed to resolve full-coverage marker for repo: acme/pdf-tools"
+    assert_not_contains "$OUTPUT_FILE" "Checking for stale skills..."
+    assert_not_contains "$OUTPUT_FILE" "Updating existing skills..."
+    assert_contains "$STATE_FILE" "rogue-skill"
+    assert_log_not_contains "remove|"
+    assert_log_not_contains "add|"
 }
 
 test_global_exclusion_removes_curated_skill_as_stale() {
@@ -859,6 +989,9 @@ EOF
         SKILLS_AUDIT_REPO_COVERAGE=0
 
     assert_contains "$OUTPUT_FILE" "Removing: pdf"
+    assert_contains "$OUTPUT_FILE" "Resolved global skill summary:"
+    assert_contains "$OUTPUT_FILE" "  (none)"
+    assert_contains "$OUTPUT_FILE" "  ^ full upstream coverage for this repo"
     assert_contains "$OUTPUT_FILE" "No skills to add."
     assert_contains "$OUTPUT_FILE" "Done."
     assert_log_contains "remove|pdf"
@@ -891,6 +1024,9 @@ run_test "repo-wide global exclusion removes entire repo" test_repo_wide_global_
 run_test "repo-wide global exclusion over explicit specs skips enumeration" test_repo_wide_global_exclusion_over_explicit_specs_skips_enumeration
 run_test "stale repo-wide global exclusion is a no-op" test_stale_repo_wide_global_exclusion_is_noop
 run_test "repo-wide global expansion reuses upstream enumeration" test_repo_wide_global_expansion_reuses_upstream_enumeration
+run_test "resolved global summary is sorted and marks full coverage" test_resolved_global_summary_is_sorted_and_marks_full_coverage
+run_test "explicit global summary marks full coverage" test_explicit_global_summary_marks_full_coverage
+run_test "summary failure happens before mutation" test_summary_failure_happens_before_mutation
 run_test "global exclusion removes curated skill as stale" test_global_exclusion_removes_curated_skill_as_stale
 run_test "global exclusion removes locally added spec" test_global_exclusion_removes_locally_added_spec
 run_test "unknown global exclusion is a no-op" test_unknown_global_exclusion_is_noop

@@ -41,6 +41,11 @@ Usage: ./deploy-project-skills.sh [options]
 Deploy curated skill families into a target directory using project-scoped
 `skills add --copy` installs.
 
+Requires:
+  - `skills`
+  - `git` for upstream enumeration used by resolved summaries, full-coverage markers, repo-wide family expansion, and coverage audit
+  - `jq` when local `.skills.local.json` overrides are present
+
 Options:
   --target DIR          Directory to install into; expands current-user ~ and ~/...
   --family NAME         Family to deploy; repeatable
@@ -761,21 +766,11 @@ main() {
     echo "Deploying skills to target directory: $install_root"
     echo "Agents: ${skills_agents[*]}"
     echo "Families: ${families[*]}"
-    echo ""
-    echo "Planned installs:"
-
     local repo repo_skills
-    for repo in "${repo_order[@]}"; do
-        repo_skills=()
-        IFS=' ' read -r -a repo_skills <<< "${specs_by_repo[$repo]}"
-        if [ "${#repo_skills[@]}" -eq 0 ]; then
-            echo "  $repo: (all skills)"
-        else
-            echo "  $repo: ${repo_skills[*]}"
-        fi
-    done
 
     if [ "$dry_run" -eq 1 ]; then
+        echo ""
+        print_resolved_repo_skill_summary "Planned installs:" specs
         exit 0
     fi
 
@@ -813,6 +808,9 @@ main() {
             echo "  No family coverage drift found."
         fi
     fi
+
+    echo ""
+    print_resolved_repo_skill_summary "Planned installs:" specs
 
     if [ "$assume_yes" -ne 1 ]; then
         confirm_or_exit "Proceed with project skill deployment?"

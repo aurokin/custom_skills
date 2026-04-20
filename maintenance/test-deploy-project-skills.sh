@@ -40,6 +40,23 @@ assert_not_contains() {
     fi
 }
 
+assert_line_order() {
+    local file="$1"
+    local first="$2"
+    local second="$3"
+    local first_line second_line
+
+    first_line="$(grep -Fn -- "$first" "$file" | head -n 1 | cut -d: -f1 || true)"
+    second_line="$(grep -Fn -- "$second" "$file" | head -n 1 | cut -d: -f1 || true)"
+
+    if [ -z "$first_line" ] || [ -z "$second_line" ] || [ "$first_line" -ge "$second_line" ]; then
+        echo "--- $file ---" >&2
+        cat "$file" >&2
+        echo "------------" >&2
+        fail "expected '$first' to appear before '$second'"
+    fi
+}
+
 assert_log_contains() {
     assert_contains "$LOG_FILE" "$1"
 }
@@ -152,8 +169,9 @@ EOF
 seed_default_mock_repos() {
     local expo_root="$MOCK_REPOS/expo/skills"
     local convex_root="$MOCK_REPOS/waynesutton/convexskills"
+    local mobile_root="$MOCK_REPOS/acme/mobile-skills"
 
-    mkdir -p "$expo_root" "$convex_root"
+    mkdir -p "$expo_root" "$convex_root" "$mobile_root"
 
     create_mock_skill_file "$expo_root" "building-native-ui"
     create_mock_skill_file "$expo_root" "expo-api-routes"
@@ -179,6 +197,9 @@ seed_default_mock_repos() {
     create_mock_skill_file "$convex_root" "convex-schema-validator"
     create_mock_skill_file "$convex_root" "convex-security-audit"
     create_mock_skill_file "$convex_root" "convex-security-check"
+
+    create_mock_skill_file "$mobile_root" "expo-internals"
+    create_mock_skill_file "$mobile_root" "release-ops"
 }
 
 write_fake_git_cli() {
@@ -363,6 +384,7 @@ test_help_without_dependencies() {
 
     assert_contains "$OUTPUT_FILE" "Usage: ./deploy-project-skills.sh [options]"
     assert_contains "$OUTPUT_FILE" "--list-families"
+    assert_contains "$OUTPUT_FILE" '`git` for upstream enumeration used by resolved summaries, full-coverage markers, repo-wide family expansion, and coverage audit'
 }
 
 test_missing_flag_values_fail_fast() {
@@ -583,7 +605,11 @@ test_all_families_deploy() {
 
 test_repo_wide_family_spec_installs_all_skills() {
     local wide_catalog="$TEST_ROOT/wide-catalog"
-    mkdir -p "$wide_catalog/families"
+    local shared_repo_root="$MOCK_REPOS/acme/shared-skills"
+    mkdir -p "$wide_catalog/families" "$shared_repo_root"
+    create_mock_skill_file "$shared_repo_root" "alpha"
+    create_mock_skill_file "$shared_repo_root" "beta"
+    create_mock_skill_file "$shared_repo_root" "gamma"
 
     cat > "$wide_catalog/families.tsv" <<'EOF'
 wide	Wide family
@@ -604,12 +630,20 @@ EOF
     ) > "$OUTPUT_FILE" 2>&1
 
     assert_contains "$OUTPUT_FILE" "Families: wide"
-    assert_contains "$OUTPUT_FILE" "acme/shared-skills: (all skills)"
+    assert_contains "$OUTPUT_FILE" "Planned installs:"
+    assert_contains "$OUTPUT_FILE" "  acme/shared-skills^: alpha beta gamma"
+    assert_contains "$OUTPUT_FILE" "  ^ full upstream coverage for this repo"
     assert_log_contains "add|acme/shared-skills|agents=codex opencode gemini-cli github-copilot claude-code|skills=<all>|copy=1|yes=1"
 }
 
 test_repo_wide_local_family_spec_installs_all_skills_without_exclusions() {
     local local_config_file="$TEST_ROOT/.skills.local.json"
+    local shared_repo_root="$MOCK_REPOS/acme/shared-skills"
+
+    mkdir -p "$shared_repo_root"
+    create_mock_skill_file "$shared_repo_root" "alpha"
+    create_mock_skill_file "$shared_repo_root" "beta"
+    create_mock_skill_file "$shared_repo_root" "gamma"
 
     cat > "$local_config_file" <<'EOF'
 {
@@ -633,11 +667,49 @@ EOF
     ) > "$OUTPUT_FILE" 2>&1
 
     assert_contains "$OUTPUT_FILE" "Families: expo"
-    assert_contains "$OUTPUT_FILE" "acme/shared-skills: (all skills)"
+    assert_contains "$OUTPUT_FILE" "Planned installs:"
+    assert_contains "$OUTPUT_FILE" "  acme/shared-skills^: alpha beta gamma"
+    assert_contains "$OUTPUT_FILE" "  ^ full upstream coverage for this repo"
     assert_log_contains "add|acme/shared-skills|agents=codex opencode gemini-cli github-copilot claude-code|skills=<all>|copy=1|yes=1"
 }
 
-test_repo_wide_family_dry_run_does_not_require_git_without_exclusions() {
+test_explicit_family_summary_marks_full_coverage() {
+    local explicit_catalog="$TEST_ROOT/explicit-catalog"
+    local shared_repo_root="$MOCK_REPOS/acme/shared-skills"
+
+    mkdir -p "$explicit_catalog/families" "$shared_repo_root"
+    create_mock_skill_file "$shared_repo_root" "alpha"
+    create_mock_skill_file "$shared_repo_root" "beta"
+    create_mock_skill_file "$shared_repo_root" "gamma"
+
+    cat > "$explicit_catalog/families.tsv" <<'EOF'
+explicit	Explicit family
+EOF
+    cat > "$explicit_catalog/families/explicit.txt" <<'EOF'
+acme/shared-skills@alpha
+acme/shared-skills@beta
+acme/shared-skills@gamma
+EOF
+
+    (
+        cd "$REPO_DIR"
+        SKILL_CATALOG_DIR="$explicit_catalog" \
+        SKILLS_BIN="$TEST_ROOT/bin/skills" \
+        SKILLS_AUDIT_REPO_COVERAGE=0 \
+        "$DEPLOY_SCRIPT" \
+            --target "$PLAIN_TARGET" \
+            --family explicit \
+            --yes
+    ) > "$OUTPUT_FILE" 2>&1
+
+    assert_contains "$OUTPUT_FILE" "Families: explicit"
+    assert_contains "$OUTPUT_FILE" "Planned installs:"
+    assert_contains "$OUTPUT_FILE" "  acme/shared-skills^: alpha beta gamma"
+    assert_contains "$OUTPUT_FILE" "  ^ full upstream coverage for this repo"
+    assert_log_contains "add|acme/shared-skills|agents=codex opencode gemini-cli github-copilot claude-code|skills=alpha beta gamma|copy=1|yes=1"
+}
+
+test_repo_wide_family_dry_run_requires_git_for_exact_summary() {
     local wide_catalog="$TEST_ROOT/wide-catalog"
     local no_git_bin="$TEST_ROOT/no-git-bin"
 
@@ -651,7 +723,7 @@ EOF
 acme/shared-skills
 EOF
 
-    (
+    if (
         cd "$REPO_DIR"
         PATH="$no_git_bin" \
         SKILL_CATALOG_DIR="$wide_catalog" \
@@ -659,11 +731,11 @@ EOF
             --target "$PLAIN_TARGET" \
             --family wide \
             --dry-run
-    ) > "$OUTPUT_FILE" 2>&1
+    ) > "$OUTPUT_FILE" 2>&1; then
+        fail "expected repo-wide dry run to require git for exact summary output"
+    fi
 
-    assert_contains "$OUTPUT_FILE" "Families: wide"
-    assert_contains "$OUTPUT_FILE" "acme/shared-skills: (all skills)"
-    assert_not_contains "$OUTPUT_FILE" "Cannot expand repo-wide skill spec without git"
+    assert_contains "$OUTPUT_FILE" "Cannot resolve repo summary for repo-wide skill spec without git: acme/shared-skills"
     assert_git_log_not_contains "git|clone"
 }
 
@@ -842,8 +914,12 @@ EOF
 test_family_exclusion_is_scoped_per_family() {
     local overlap_catalog="$TEST_ROOT/overlap-catalog"
     local local_config_file="$TEST_ROOT/.skills.local.json"
+    local shared_repo_root="$MOCK_REPOS/acme/shared-skills"
 
-    mkdir -p "$overlap_catalog/families"
+    mkdir -p "$overlap_catalog/families" "$shared_repo_root"
+    create_mock_skill_file "$shared_repo_root" "shared-workflow"
+    create_mock_skill_file "$shared_repo_root" "alpha-only"
+    create_mock_skill_file "$shared_repo_root" "beta-only"
     cat > "$overlap_catalog/families.tsv" <<'EOF'
 alpha	Alpha family
 beta	Beta family
@@ -971,8 +1047,14 @@ EOF
     ) > "$OUTPUT_FILE" 2>&1
 
     assert_contains "$OUTPUT_FILE" "Families: wide-mixed"
-    assert_contains "$OUTPUT_FILE" "acme/shared-skills: alpha gamma"
-    assert_contains "$OUTPUT_FILE" "acme/toolbox-skills: (all skills)"
+    assert_contains "$OUTPUT_FILE" "Planned installs:"
+    assert_contains "$OUTPUT_FILE" "  acme/shared-skills: alpha gamma"
+    assert_contains "$OUTPUT_FILE" "  acme/toolbox-skills^: delta epsilon"
+    assert_contains "$OUTPUT_FILE" "  ^ full upstream coverage for this repo"
+    assert_line_order \
+        "$OUTPUT_FILE" \
+        "  acme/shared-skills: alpha gamma" \
+        "  acme/toolbox-skills^: delta epsilon"
     assert_log_contains "add|acme/shared-skills|agents=codex opencode gemini-cli github-copilot claude-code|skills=alpha gamma|copy=1|yes=1"
     assert_log_contains "add|acme/toolbox-skills|agents=codex opencode gemini-cli github-copilot claude-code|skills=<all>|copy=1|yes=1"
 }
@@ -981,8 +1063,12 @@ test_explicit_family_resolution_is_deterministic_across_runs() {
     local overlap_catalog="$TEST_ROOT/deterministic-overlap-catalog"
     local local_config_file="$TEST_ROOT/.skills.local.json"
     local expected_line="add|acme/shared-skills|agents=codex opencode gemini-cli github-copilot claude-code|skills=alpha-only shared-workflow beta-only|copy=1|yes=1"
+    local shared_repo_root="$MOCK_REPOS/acme/shared-skills"
 
-    mkdir -p "$overlap_catalog/families"
+    mkdir -p "$overlap_catalog/families" "$shared_repo_root"
+    create_mock_skill_file "$shared_repo_root" "shared-workflow"
+    create_mock_skill_file "$shared_repo_root" "alpha-only"
+    create_mock_skill_file "$shared_repo_root" "beta-only"
     cat > "$overlap_catalog/families.tsv" <<'EOF'
 alpha	Alpha family
 beta	Beta family
@@ -1074,6 +1160,8 @@ EOF
 
     assert_contains "$OUTPUT_FILE" "Families: solo"
     assert_contains "$OUTPUT_FILE" "Planned installs:"
+    assert_contains "$OUTPUT_FILE" "  (none)"
+    assert_contains "$OUTPUT_FILE" "  ^ full upstream coverage for this repo"
     assert_contains "$OUTPUT_FILE" "Done."
     assert_log_not_contains "add|"
 }
@@ -1278,7 +1366,7 @@ EOF
     assert_log_contains "add|expo/skills|agents=codex opencode gemini-cli github-copilot claude-code|skills=building-native-ui expo-api-routes expo-deployment expo-dev-client expo-tailwind-setup native-data-fetching upgrading-expo use-dom|copy=1|yes=1"
 }
 
-test_dry_run_skips_audit_and_install() {
+test_dry_run_skips_audit_and_install_but_keeps_exact_summary_enumeration() {
     create_mock_skill_file "$MOCK_REPOS/expo/skills" "newly-added-skill"
 
     (
@@ -1296,7 +1384,7 @@ test_dry_run_skips_audit_and_install() {
     assert_not_contains "$OUTPUT_FILE" "Auditing curated family repos..."
     assert_not_contains "$OUTPUT_FILE" "WARN: Undeclared upstream skill(s)"
     assert_log_not_contains "add|"
-    assert_git_log_not_contains "git|clone"
+    assert_contains "$GIT_LOG_FILE" "git|clone --depth 1 https://github.com/expo/skills.git"
 }
 
 test_invalid_catalog_spec_fails_fast() {
@@ -1343,7 +1431,8 @@ run_test "interactive family selection reports invalid local config" test_intera
 run_test "all families deploy" test_all_families_deploy
 run_test "repo-wide family spec installs all skills" test_repo_wide_family_spec_installs_all_skills
 run_test "repo-wide local family spec installs all skills without exclusions" test_repo_wide_local_family_spec_installs_all_skills_without_exclusions
-run_test "repo-wide family dry run does not require git without exclusions" test_repo_wide_family_dry_run_does_not_require_git_without_exclusions
+run_test "explicit family summary marks full coverage" test_explicit_family_summary_marks_full_coverage
+run_test "repo-wide family dry run requires git for exact summary" test_repo_wide_family_dry_run_requires_git_for_exact_summary
 run_test "invalid excludeFamilySpecs schema fails fast" test_invalid_exclude_family_specs_schema_fails_fast
 run_test "unknown excludeFamilySpecs family fails fast" test_unknown_exclude_family_key_fails_fast
 run_test "excludeFamilySpecs entries must be explicit skills" test_exclude_family_specs_require_explicit_skills
@@ -1361,7 +1450,7 @@ run_test "custom local family rejects empty specs" test_custom_local_family_reje
 run_test "custom local family rejects multiline description" test_custom_local_family_rejects_multiline_description
 run_test "family audit warning is non-fatal" test_family_audit_warning_nonfatal
 run_test "family exclusion is ignored in repo coverage audit" test_family_exclusion_is_ignored_in_repo_coverage_audit
-run_test "dry run skips audit and install" test_dry_run_skips_audit_and_install
+run_test "dry run skips audit and install but keeps exact summary enumeration" test_dry_run_skips_audit_and_install_but_keeps_exact_summary_enumeration
 run_test "invalid catalog spec fails fast" test_invalid_catalog_spec_fails_fast
 
 echo "PASSED: $TESTS_RUN test(s)"
