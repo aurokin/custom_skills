@@ -129,7 +129,7 @@ main() {
     # Build set of exact expected skill names from the curated specs.
     local -A desired_names=()
     local -A declared_by_repo=()
-    append_specs_to_repo_skill_map expanded_specs declared_by_repo
+    append_specs_to_repo_skill_map desired_specs declared_by_repo
     for spec in "${desired_specs[@]}"; do
         local repo
         local name
