@@ -475,6 +475,19 @@ append_specs_to_repo_skill_map() {
     done
 }
 
+mark_repos_from_specs() {
+    local specs_name="$1"
+    local target_name="$2"
+    local -n specs_ref="$specs_name"
+    local -n target_ref="$target_name"
+    local spec repo
+
+    for spec in "${specs_ref[@]}"; do
+        repo="$(spec_repo "$spec")"
+        target_ref["$repo"]=1
+    done
+}
+
 collect_effective_family_excluded_specs() {
     local family_names_name="$1"
     local final_specs_name="$2"
@@ -666,6 +679,7 @@ main() {
     collect_effective_family_excluded_specs families specs excluded_specs || exit 1
 
     local -A declared_by_repo=()
+    local -A audited_family_repos=()
     local spec repo skill_name
     for spec in "${specs[@]}"; do
         repo="$(spec_repo "$spec")"
@@ -680,6 +694,8 @@ main() {
             fi
         fi
     done
+    mark_repos_from_specs specs audited_family_repos
+    mark_repos_from_specs excluded_specs audited_family_repos
 
     local -a coverage_repos=()
     local -A ignored_by_repo=()
@@ -728,15 +744,15 @@ main() {
         local audit_warnings=0
         local audit_failures=0
         for coverage_repo in "${coverage_repos[@]}"; do
-            if [[ -z "${declared_by_repo[$coverage_repo]:-}" ]]; then
+            if [[ -z "${audited_family_repos[$coverage_repo]:-}" ]]; then
                 continue
             fi
-            if [[ "${declared_by_repo[$coverage_repo]}" == "__ALL__" ]]; then
+            if [[ "${declared_by_repo[$coverage_repo]:-}" == "__ALL__" ]]; then
                 continue
             fi
             if audit_repo_skill_coverage \
                 "$coverage_repo" \
-                "${declared_by_repo[$coverage_repo]}" \
+                "${declared_by_repo[$coverage_repo]:-}" \
                 "${ignored_by_repo[$coverage_repo]:-}"; then
                 :
             else

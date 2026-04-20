@@ -904,6 +904,61 @@ EOF
     assert_log_not_contains "add|"
 }
 
+test_fully_excluded_repo_still_participates_in_coverage_audit() {
+    local empty_catalog="$TEST_ROOT/empty-audit-catalog"
+    local local_config_file="$TEST_ROOT/.skills.local.json"
+    local coverage_manifest="$TEST_ROOT/empty-audit-coverage.json"
+    local shared_repo_root="$MOCK_REPOS/acme/shared-skills"
+
+    mkdir -p "$empty_catalog/families" "$shared_repo_root"
+    cat > "$empty_catalog/families.tsv" <<'EOF'
+solo	Solo family
+EOF
+    cat > "$empty_catalog/families/solo.txt" <<'EOF'
+acme/shared-skills@solo-skill
+EOF
+    cat > "$local_config_file" <<'EOF'
+{
+  "excludeFamilySpecs": {
+    "solo": [
+      "acme/shared-skills@solo-skill"
+    ]
+  }
+}
+EOF
+    cat > "$coverage_manifest" <<'EOF'
+{
+  "repos": [
+    {
+      "repo": "acme/shared-skills",
+      "ignored": []
+    }
+  ]
+}
+EOF
+    create_mock_skill_file "$shared_repo_root" "solo-skill"
+    create_mock_skill_file "$shared_repo_root" "newly-added-skill"
+
+    (
+        cd "$REPO_DIR"
+        PATH="$TEST_ROOT/bin:$ORIGINAL_PATH" \
+        SKILL_CATALOG_DIR="$empty_catalog" \
+        LOCAL_SKILLS_CONFIG_FILE="$local_config_file" \
+        SKILLS_BIN="$TEST_ROOT/bin/skills" \
+        FAMILY_UPSTREAM_COVERAGE_FILE="$coverage_manifest" \
+        "$DEPLOY_SCRIPT" \
+            --target "$PLAIN_TARGET" \
+            --family solo \
+            --yes
+    ) > "$OUTPUT_FILE" 2>&1
+
+    assert_contains "$OUTPUT_FILE" "Auditing curated family repos..."
+    assert_contains "$OUTPUT_FILE" "WARN: Undeclared upstream skill(s) in acme/shared-skills: newly-added-skill"
+    assert_not_contains "$OUTPUT_FILE" "No family coverage drift found."
+    assert_contains "$OUTPUT_FILE" "Done."
+    assert_log_not_contains "add|"
+}
+
 test_custom_local_family_lists_and_deploys() {
     local local_config_file="$TEST_ROOT/.skills.local.json"
     cat > "$local_config_file" <<'EOF'
@@ -1122,6 +1177,7 @@ run_test "family exclusion removes locally added spec" test_family_exclusion_rem
 run_test "family exclusion is scoped per family" test_family_exclusion_is_scoped_per_family
 run_test "repo-wide family exclusion normalizes before filtering" test_repo_wide_family_exclusion_normalizes_before_filtering
 run_test "empty result after family exclusions is valid" test_empty_result_after_family_exclusions_is_valid
+run_test "fully excluded repo still participates in coverage audit" test_fully_excluded_repo_still_participates_in_coverage_audit
 run_test "custom local family lists and deploys" test_custom_local_family_lists_and_deploys
 run_test "custom local family rejects empty specs" test_custom_local_family_rejects_empty_specs
 run_test "custom local family rejects multiline description" test_custom_local_family_rejects_multiline_description
