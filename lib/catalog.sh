@@ -19,6 +19,18 @@ validate_spec_line() {
     fi
 }
 
+validate_explicit_spec_line() {
+    local spec="$1"
+    local file="$2"
+    local line_number="$3"
+
+    validate_spec_line "$spec" "$file" "$line_number" || return 1
+    if ! spec_has_explicit_skill "$spec"; then
+        echo "Explicit skill spec required in $file:$line_number: $spec" >&2
+        return 1
+    fi
+}
+
 validate_family_name() {
     local family_name="$1"
     local file="$2"
@@ -170,6 +182,7 @@ ensure_local_skills_config_valid() {
     if ! jq -e '
         type == "object" and
         ((.globalSpecs // []) | type == "array") and
+        ((.excludeGlobalSpecs // []) | type == "array") and
         ((.familySpecs // {}) | type == "object") and
         ((.customFamilies // {}) | type == "object") and
         all((.familySpecs // {})[]?; type == "array") and
@@ -190,6 +203,15 @@ ensure_local_skills_config_valid() {
         (.globalSpecs // [])
         | to_entries[]
         | "globalSpecs[\(.key)]\t\(.value)"
+    ' "$config_file")
+
+    while IFS=$'\t' read -r field_name spec; do
+        [ -z "$field_name" ] && continue
+        validate_explicit_spec_line "$spec" "$config_file" "$field_name" || return 2
+    done < <(jq -r '
+        (.excludeGlobalSpecs // [])
+        | to_entries[]
+        | "excludeGlobalSpecs[\(.key)]\t\(.value)"
     ' "$config_file")
 
     while IFS= read -r family_name; do
@@ -267,6 +289,32 @@ append_local_global_specs() {
         [ -z "$spec" ] && continue
         target_ref+=("$spec")
     done < <(jq -r '.globalSpecs[]?' "$LOCAL_SKILLS_CONFIG_FILE")
+}
+
+load_local_global_exclude_specs() {
+    local target_name="$1"
+    local -n target_ref="$target_name"
+    local status=0
+    local spec
+
+    target_ref=()
+
+    if ensure_local_skills_config_valid; then
+        status=0
+    else
+        status=$?
+        if [ "$status" -eq 1 ]; then
+            return 0
+        fi
+        return 1
+    fi
+
+    while IFS= read -r spec; do
+        [ -z "$spec" ] && continue
+        target_ref+=("$spec")
+    done < <(jq -r '.excludeGlobalSpecs[]?' "$LOCAL_SKILLS_CONFIG_FILE")
+
+    dedupe_array "$target_name"
 }
 
 append_local_family_specs() {

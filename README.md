@@ -34,7 +34,8 @@ It will:
 Use it when you want to update your personal baseline skill environment.
 
 If `.skills.local.json` exists, its `globalSpecs` are merged into the desired
-global set before stale-skill removal runs.
+global set and its `excludeGlobalSpecs` remove explicit upstream skills from
+that resolved global set before stale-skill removal runs.
 
 Planned exclusion-override behavior and planned resolved summary output are
 documented in
@@ -151,6 +152,8 @@ Supported keys:
 
 - `globalSpecs`
   additive upstream specs merged into `install-repro-skills.sh`
+- `excludeGlobalSpecs`
+  explicit upstream specs removed from the resolved global install set
 - `familySpecs`
   additive specs keyed by existing curated family name
 - `customFamilies`
@@ -166,6 +169,9 @@ Example:
 {
   "globalSpecs": [
     "owner/repo@my-global-skill"
+  ],
+  "excludeGlobalSpecs": [
+    "openai/skills@pdf"
   ],
   "familySpecs": {
     "expo": [
@@ -185,7 +191,7 @@ Example:
 
 Rules:
 
-- local config is additive today
+- `excludeGlobalSpecs` only accepts explicit `owner/repo@skill-name` entries
 - `familySpecs` can only target existing curated families
 - `customFamilies` cannot reuse a curated family name
 - duplicate specs are deduped with curated entries first
