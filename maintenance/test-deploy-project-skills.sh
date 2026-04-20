@@ -820,6 +820,51 @@ EOF
     assert_log_contains "add|acme/shared-skills|agents=codex opencode gemini-cli github-copilot claude-code|skills=alpha-only shared-workflow beta-only|copy=1|yes=1"
 }
 
+test_repo_wide_family_exclusion_normalizes_before_filtering() {
+    local wide_catalog="$TEST_ROOT/wide-exclusion-catalog"
+    local local_config_file="$TEST_ROOT/.skills.local.json"
+    local shared_repo_root="$MOCK_REPOS/acme/shared-skills"
+
+    mkdir -p "$wide_catalog/families" "$shared_repo_root"
+    create_mock_skill_file "$shared_repo_root" "alpha"
+    create_mock_skill_file "$shared_repo_root" "beta"
+    create_mock_skill_file "$shared_repo_root" "gamma"
+
+    cat > "$wide_catalog/families.tsv" <<'EOF'
+wide	Wide family
+EOF
+    cat > "$wide_catalog/families/wide.txt" <<'EOF'
+acme/shared-skills
+EOF
+    cat > "$local_config_file" <<'EOF'
+{
+  "excludeFamilySpecs": {
+    "wide": [
+      "acme/shared-skills@beta"
+    ]
+  }
+}
+EOF
+
+    (
+        cd "$REPO_DIR"
+        SKILL_CATALOG_DIR="$wide_catalog" \
+        LOCAL_SKILLS_CONFIG_FILE="$local_config_file" \
+        SKILLS_BIN="$TEST_ROOT/bin/skills" \
+        SKILLS_AUDIT_REPO_COVERAGE=0 \
+        "$DEPLOY_SCRIPT" \
+            --target "$PLAIN_TARGET" \
+            --family wide \
+            --yes
+    ) > "$OUTPUT_FILE" 2>&1
+
+    assert_contains "$OUTPUT_FILE" "Families: wide"
+    assert_contains "$OUTPUT_FILE" "acme/shared-skills: alpha gamma"
+    assert_log_contains "add|acme/shared-skills|agents=codex opencode gemini-cli github-copilot claude-code|skills=alpha gamma|copy=1|yes=1"
+    assert_log_not_contains "skills=<all>"
+    assert_log_not_contains "skills=alpha beta gamma"
+}
+
 test_empty_result_after_family_exclusions_is_valid() {
     local empty_catalog="$TEST_ROOT/empty-catalog"
     local local_config_file="$TEST_ROOT/.skills.local.json"
@@ -1044,6 +1089,7 @@ run_test "local family specs extend curated family" test_local_family_specs_exte
 run_test "family exclusion removes curated skill" test_family_exclusion_removes_curated_skill
 run_test "family exclusion removes locally added spec" test_family_exclusion_removes_locally_added_spec
 run_test "family exclusion is scoped per family" test_family_exclusion_is_scoped_per_family
+run_test "repo-wide family exclusion normalizes before filtering" test_repo_wide_family_exclusion_normalizes_before_filtering
 run_test "empty result after family exclusions is valid" test_empty_result_after_family_exclusions_is_valid
 run_test "custom local family lists and deploys" test_custom_local_family_lists_and_deploys
 run_test "custom local family rejects empty specs" test_custom_local_family_rejects_empty_specs

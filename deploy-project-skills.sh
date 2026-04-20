@@ -281,6 +281,123 @@ filter_excluded_specs() {
     done
 }
 
+expand_full_repo_specs() {
+    local -n specs_ref="$1"
+    local -n expanded_specs_ref="$2"
+    local spec repo skill_name
+    local upstream_skill_names
+
+    expanded_specs_ref=()
+    for spec in "${specs_ref[@]}"; do
+        if spec_has_explicit_skill "$spec"; then
+            expanded_specs_ref+=("$spec")
+            continue
+        fi
+
+        repo="$(spec_repo "$spec")"
+        if ! command -v git >/dev/null 2>&1; then
+            echo "Cannot expand repo-wide skill spec without git: $repo" >&2
+            return 1
+        fi
+
+        if ! upstream_skill_names="$(collect_upstream_skill_names "$repo" | sort -u)"; then
+            echo "Failed to expand repo-wide skill spec: $repo" >&2
+            return 1
+        fi
+
+        while IFS= read -r skill_name; do
+            [ -z "$skill_name" ] && continue
+            expanded_specs_ref+=("$repo@$skill_name")
+        done <<< "$upstream_skill_names"
+    done
+}
+
+resolve_curated_family_specs() {
+    local family_name="$1"
+    local family_specs_name="$2"
+    local target_name="$3"
+    local -n family_specs_ref="$family_specs_name"
+    local -n target_ref="$target_name"
+    local family_excluded_specs=()
+    local expanded_family_specs=()
+    local filtered_family_specs=()
+    local spec repo
+    local -A surviving_lookup=()
+    local -A expanded_counts=()
+    local -A filtered_counts=()
+    local -A repo_explicit_specs=()
+    local -A repo_should_preserve_wide=()
+    local -A repo_emitted=()
+    local repo_specs=()
+
+    load_local_family_exclude_specs "$family_name" family_excluded_specs || return 1
+    if [ "${#family_excluded_specs[@]}" -eq 0 ]; then
+        target_ref=("${family_specs_ref[@]}")
+        return 0
+    fi
+
+    expand_full_repo_specs family_specs_ref expanded_family_specs || return 1
+    filter_excluded_specs expanded_family_specs family_excluded_specs filtered_family_specs
+
+    for spec in "${expanded_family_specs[@]}"; do
+        repo="$(spec_repo "$spec")"
+        expanded_counts["$repo"]=$(( ${expanded_counts[$repo]:-0} + 1 ))
+    done
+
+    for spec in "${filtered_family_specs[@]}"; do
+        repo="$(spec_repo "$spec")"
+        surviving_lookup["$spec"]=1
+        filtered_counts["$repo"]=$(( ${filtered_counts[$repo]:-0} + 1 ))
+        if [[ -z "${repo_explicit_specs[$repo]:-}" ]]; then
+            repo_explicit_specs["$repo"]="$spec"
+        else
+            repo_explicit_specs["$repo"]+=" $spec"
+        fi
+    done
+
+    for spec in "${family_specs_ref[@]}"; do
+        if spec_has_explicit_skill "$spec"; then
+            continue
+        fi
+
+        repo="$(spec_repo "$spec")"
+        if [ "${filtered_counts[$repo]:-0}" -eq "${expanded_counts[$repo]:-0}" ]; then
+            repo_should_preserve_wide["$repo"]=1
+        fi
+    done
+
+    target_ref=()
+    for spec in "${family_specs_ref[@]}"; do
+        repo="$(spec_repo "$spec")"
+
+        if ! spec_has_explicit_skill "$spec"; then
+            if [[ -n "${repo_emitted[$repo]:-}" ]]; then
+                continue
+            fi
+
+            if [[ -n "${repo_should_preserve_wide[$repo]:-}" ]]; then
+                target_ref+=("$repo")
+            elif [[ -n "${repo_explicit_specs[$repo]:-}" ]]; then
+                IFS=' ' read -r -a repo_specs <<< "${repo_explicit_specs[$repo]}"
+                target_ref+=("${repo_specs[@]}")
+            fi
+
+            repo_emitted["$repo"]=1
+            continue
+        fi
+
+        if [[ -n "${repo_should_preserve_wide[$repo]:-}" ]]; then
+            continue
+        fi
+
+        if [[ -n "${surviving_lookup[$spec]:-}" ]]; then
+            target_ref+=("$spec")
+        fi
+    done
+
+    dedupe_array "$target_name"
+}
+
 load_deploy_specs_for_families() {
     local family_names_name="$1"
     local target_name="$2"
@@ -288,7 +405,6 @@ load_deploy_specs_for_families() {
     local -n target_ref="$target_name"
     local family_name
     local family_specs=()
-    local family_excluded_specs=()
     local resolved_family_specs=()
 
     target_ref=()
@@ -296,8 +412,7 @@ load_deploy_specs_for_families() {
         load_family_specs "$family_name" family_specs || return 1
 
         if curated_family_exists "$family_name"; then
-            load_local_family_exclude_specs "$family_name" family_excluded_specs || return 1
-            filter_excluded_specs family_specs family_excluded_specs resolved_family_specs
+            resolve_curated_family_specs "$family_name" family_specs resolved_family_specs || return 1
         else
             resolved_family_specs=("${family_specs[@]}")
         fi
