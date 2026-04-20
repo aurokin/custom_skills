@@ -300,7 +300,7 @@ expand_full_repo_specs() {
             return 1
         fi
 
-        if ! upstream_skill_names="$(collect_upstream_skill_names "$repo" | sort -u)"; then
+        if ! collect_upstream_skill_names_cached "$repo" upstream_skill_names; then
             echo "Failed to expand repo-wide skill spec: $repo" >&2
             return 1
         fi
@@ -312,6 +312,46 @@ expand_full_repo_specs() {
     done
 }
 
+resolve_excluded_specs() {
+    local excludes_name="$1"
+    local available_name="$2"
+    local target_name="$3"
+    local -n excludes_ref="$excludes_name"
+    local -n available_ref="$available_name"
+    local -n target_ref="$target_name"
+    local spec repo available_spec
+    local -A available_by_repo=()
+
+    target_ref=()
+    for spec in "${available_ref[@]}"; do
+        repo="$(spec_repo "$spec")"
+        if [[ -z "${available_by_repo[$repo]:-}" ]]; then
+            available_by_repo["$repo"]="$spec"
+        else
+            available_by_repo["$repo"]+=$'\n'"$spec"
+        fi
+    done
+
+    for spec in "${excludes_ref[@]}"; do
+        if spec_has_explicit_skill "$spec"; then
+            target_ref+=("$spec")
+            continue
+        fi
+
+        repo="$(spec_repo "$spec")"
+        if [[ -z "${available_by_repo[$repo]:-}" ]]; then
+            continue
+        fi
+
+        while IFS= read -r available_spec; do
+            [ -z "$available_spec" ] && continue
+            target_ref+=("$available_spec")
+        done <<< "${available_by_repo[$repo]}"
+    done
+
+    dedupe_array "$target_name"
+}
+
 resolve_curated_family_specs() {
     local family_name="$1"
     local family_specs_name="$2"
@@ -320,6 +360,7 @@ resolve_curated_family_specs() {
     local -n target_ref="$target_name"
     local family_excluded_specs=()
     local expanded_family_specs=()
+    local resolved_excluded_specs=()
     local filtered_family_specs=()
     local spec repo
     local -A surviving_lookup=()
@@ -337,7 +378,8 @@ resolve_curated_family_specs() {
     fi
 
     expand_full_repo_specs family_specs_ref expanded_family_specs || return 1
-    filter_excluded_specs expanded_family_specs family_excluded_specs filtered_family_specs
+    resolve_excluded_specs family_excluded_specs expanded_family_specs resolved_excluded_specs
+    filter_excluded_specs expanded_family_specs resolved_excluded_specs filtered_family_specs
 
     for spec in "${expanded_family_specs[@]}"; do
         repo="$(spec_repo "$spec")"

@@ -8,6 +8,9 @@ DEPLOY_SCRIPT="$REPO_DIR/deploy-project-skills.sh"
 FAMILY_MANIFEST_TEMPLATE="$REPO_DIR/catalog/family-coverage.json"
 ORIGINAL_PATH="$PATH"
 SYSTEM_GIT="$(command -v git)"
+SYSTEM_BASH="$(command -v bash)"
+SYSTEM_DIRNAME="$(command -v dirname)"
+SYSTEM_AWK="$(command -v awk)"
 TESTS_RUN=0
 
 fail() {
@@ -581,11 +584,12 @@ test_all_families_deploy() {
 test_repo_wide_family_spec_installs_all_skills() {
     local wide_catalog="$TEST_ROOT/wide-catalog"
     mkdir -p "$wide_catalog/families"
+
     cat > "$wide_catalog/families.tsv" <<'EOF'
-all-openai	All OpenAI skills
+wide	Wide family
 EOF
-    cat > "$wide_catalog/families/all-openai.txt" <<'EOF'
-openai/skills
+    cat > "$wide_catalog/families/wide.txt" <<'EOF'
+acme/shared-skills
 EOF
 
     (
@@ -595,13 +599,72 @@ EOF
         SKILLS_AUDIT_REPO_COVERAGE=0 \
         "$DEPLOY_SCRIPT" \
             --target "$PLAIN_TARGET" \
-            --family all-openai \
+            --family wide \
             --yes
     ) > "$OUTPUT_FILE" 2>&1
 
-    assert_contains "$OUTPUT_FILE" "Families: all-openai"
-    assert_contains "$OUTPUT_FILE" "openai/skills: (all skills)"
-    assert_log_contains "add|openai/skills|agents=codex opencode gemini-cli github-copilot claude-code|skills=<all>|copy=1|yes=1"
+    assert_contains "$OUTPUT_FILE" "Families: wide"
+    assert_contains "$OUTPUT_FILE" "acme/shared-skills: (all skills)"
+    assert_log_contains "add|acme/shared-skills|agents=codex opencode gemini-cli github-copilot claude-code|skills=<all>|copy=1|yes=1"
+}
+
+test_repo_wide_local_family_spec_installs_all_skills_without_exclusions() {
+    local local_config_file="$TEST_ROOT/.skills.local.json"
+
+    cat > "$local_config_file" <<'EOF'
+{
+  "familySpecs": {
+    "expo": [
+      "acme/shared-skills"
+    ]
+  }
+}
+EOF
+
+    (
+        cd "$REPO_DIR"
+        LOCAL_SKILLS_CONFIG_FILE="$local_config_file" \
+        SKILLS_BIN="$TEST_ROOT/bin/skills" \
+        SKILLS_AUDIT_REPO_COVERAGE=0 \
+        "$DEPLOY_SCRIPT" \
+            --target "$PLAIN_TARGET" \
+            --family expo \
+            --yes
+    ) > "$OUTPUT_FILE" 2>&1
+
+    assert_contains "$OUTPUT_FILE" "Families: expo"
+    assert_contains "$OUTPUT_FILE" "acme/shared-skills: (all skills)"
+    assert_log_contains "add|acme/shared-skills|agents=codex opencode gemini-cli github-copilot claude-code|skills=<all>|copy=1|yes=1"
+}
+
+test_repo_wide_family_dry_run_does_not_require_git_without_exclusions() {
+    local wide_catalog="$TEST_ROOT/wide-catalog"
+    local no_git_bin="$TEST_ROOT/no-git-bin"
+
+    mkdir -p "$wide_catalog/families" "$no_git_bin"
+    ln -s "$SYSTEM_DIRNAME" "$no_git_bin/dirname"
+    ln -s "$SYSTEM_AWK" "$no_git_bin/awk"
+    cat > "$wide_catalog/families.tsv" <<'EOF'
+wide	Wide family
+EOF
+    cat > "$wide_catalog/families/wide.txt" <<'EOF'
+acme/shared-skills
+EOF
+
+    (
+        cd "$REPO_DIR"
+        PATH="$no_git_bin" \
+        SKILL_CATALOG_DIR="$wide_catalog" \
+        "$SYSTEM_BASH" "$DEPLOY_SCRIPT" \
+            --target "$PLAIN_TARGET" \
+            --family wide \
+            --dry-run
+    ) > "$OUTPUT_FILE" 2>&1
+
+    assert_contains "$OUTPUT_FILE" "Families: wide"
+    assert_contains "$OUTPUT_FILE" "acme/shared-skills: (all skills)"
+    assert_not_contains "$OUTPUT_FILE" "Cannot expand repo-wide skill spec without git"
+    assert_git_log_not_contains "git|clone"
 }
 
 test_invalid_exclude_family_specs_schema_fails_fast() {
@@ -863,6 +926,117 @@ EOF
     assert_log_contains "add|acme/shared-skills|agents=codex opencode gemini-cli github-copilot claude-code|skills=alpha gamma|copy=1|yes=1"
     assert_log_not_contains "skills=<all>"
     assert_log_not_contains "skills=alpha beta gamma"
+}
+
+test_family_exclusion_preserves_unaffected_repo_wide_specs() {
+    local mixed_catalog="$TEST_ROOT/mixed-wide-exclusion-catalog"
+    local local_config_file="$TEST_ROOT/.skills.local.json"
+    local shared_repo_root="$MOCK_REPOS/acme/shared-skills"
+    local toolbox_repo_root="$MOCK_REPOS/acme/toolbox-skills"
+
+    mkdir -p "$mixed_catalog/families" "$shared_repo_root" "$toolbox_repo_root"
+    create_mock_skill_file "$shared_repo_root" "alpha"
+    create_mock_skill_file "$shared_repo_root" "beta"
+    create_mock_skill_file "$shared_repo_root" "gamma"
+    create_mock_skill_file "$toolbox_repo_root" "delta"
+    create_mock_skill_file "$toolbox_repo_root" "epsilon"
+
+    cat > "$mixed_catalog/families.tsv" <<'EOF'
+wide-mixed	Wide mixed family
+EOF
+    cat > "$mixed_catalog/families/wide-mixed.txt" <<'EOF'
+acme/shared-skills
+acme/toolbox-skills
+EOF
+    cat > "$local_config_file" <<'EOF'
+{
+  "excludeFamilySpecs": {
+    "wide-mixed": [
+      "acme/shared-skills@beta"
+    ]
+  }
+}
+EOF
+
+    (
+        cd "$REPO_DIR"
+        SKILL_CATALOG_DIR="$mixed_catalog" \
+        LOCAL_SKILLS_CONFIG_FILE="$local_config_file" \
+        SKILLS_BIN="$TEST_ROOT/bin/skills" \
+        SKILLS_AUDIT_REPO_COVERAGE=0 \
+        "$DEPLOY_SCRIPT" \
+            --target "$PLAIN_TARGET" \
+            --family wide-mixed \
+            --yes
+    ) > "$OUTPUT_FILE" 2>&1
+
+    assert_contains "$OUTPUT_FILE" "Families: wide-mixed"
+    assert_contains "$OUTPUT_FILE" "acme/shared-skills: alpha gamma"
+    assert_contains "$OUTPUT_FILE" "acme/toolbox-skills: (all skills)"
+    assert_log_contains "add|acme/shared-skills|agents=codex opencode gemini-cli github-copilot claude-code|skills=alpha gamma|copy=1|yes=1"
+    assert_log_contains "add|acme/toolbox-skills|agents=codex opencode gemini-cli github-copilot claude-code|skills=<all>|copy=1|yes=1"
+}
+
+test_explicit_family_resolution_is_deterministic_across_runs() {
+    local overlap_catalog="$TEST_ROOT/deterministic-overlap-catalog"
+    local local_config_file="$TEST_ROOT/.skills.local.json"
+    local expected_line="add|acme/shared-skills|agents=codex opencode gemini-cli github-copilot claude-code|skills=alpha-only shared-workflow beta-only|copy=1|yes=1"
+
+    mkdir -p "$overlap_catalog/families"
+    cat > "$overlap_catalog/families.tsv" <<'EOF'
+alpha	Alpha family
+beta	Beta family
+EOF
+    cat > "$overlap_catalog/families/alpha.txt" <<'EOF'
+acme/shared-skills@shared-workflow
+acme/shared-skills@alpha-only
+EOF
+    cat > "$overlap_catalog/families/beta.txt" <<'EOF'
+acme/shared-skills@shared-workflow
+acme/shared-skills@beta-only
+EOF
+    cat > "$local_config_file" <<'EOF'
+{
+  "excludeFamilySpecs": {
+    "alpha": [
+      "acme/shared-skills@shared-workflow"
+    ]
+  }
+}
+EOF
+
+    (
+        cd "$REPO_DIR"
+        SKILL_CATALOG_DIR="$overlap_catalog" \
+        LOCAL_SKILLS_CONFIG_FILE="$local_config_file" \
+        SKILLS_BIN="$TEST_ROOT/bin/skills" \
+        SKILLS_AUDIT_REPO_COVERAGE=0 \
+        "$DEPLOY_SCRIPT" \
+            --target "$PLAIN_TARGET" \
+            --family alpha \
+            --family beta \
+            --yes
+    ) > "$OUTPUT_FILE" 2>&1
+
+    (
+        cd "$REPO_DIR"
+        SKILL_CATALOG_DIR="$overlap_catalog" \
+        LOCAL_SKILLS_CONFIG_FILE="$local_config_file" \
+        SKILLS_BIN="$TEST_ROOT/bin/skills" \
+        SKILLS_AUDIT_REPO_COVERAGE=0 \
+        "$DEPLOY_SCRIPT" \
+            --target "$PLAIN_TARGET" \
+            --family alpha \
+            --family beta \
+            --yes
+    ) >> "$OUTPUT_FILE" 2>&1
+
+    if [ "$(grep -Fxc "$expected_line" "$LOG_FILE")" -ne 2 ]; then
+        echo "--- $LOG_FILE ---" >&2
+        cat "$LOG_FILE" >&2
+        echo "------------" >&2
+        fail "expected repeated runs to emit identical explicit install arguments"
+    fi
 }
 
 test_empty_result_after_family_exclusions_is_valid() {
@@ -1168,6 +1342,8 @@ run_test "non-interactive custom family reports invalid local config" test_nonin
 run_test "interactive family selection reports invalid local config" test_interactive_family_selection_reports_invalid_local_config
 run_test "all families deploy" test_all_families_deploy
 run_test "repo-wide family spec installs all skills" test_repo_wide_family_spec_installs_all_skills
+run_test "repo-wide local family spec installs all skills without exclusions" test_repo_wide_local_family_spec_installs_all_skills_without_exclusions
+run_test "repo-wide family dry run does not require git without exclusions" test_repo_wide_family_dry_run_does_not_require_git_without_exclusions
 run_test "invalid excludeFamilySpecs schema fails fast" test_invalid_exclude_family_specs_schema_fails_fast
 run_test "unknown excludeFamilySpecs family fails fast" test_unknown_exclude_family_key_fails_fast
 run_test "excludeFamilySpecs entries must be explicit skills" test_exclude_family_specs_require_explicit_skills
@@ -1176,6 +1352,8 @@ run_test "family exclusion removes curated skill" test_family_exclusion_removes_
 run_test "family exclusion removes locally added spec" test_family_exclusion_removes_locally_added_spec
 run_test "family exclusion is scoped per family" test_family_exclusion_is_scoped_per_family
 run_test "repo-wide family exclusion normalizes before filtering" test_repo_wide_family_exclusion_normalizes_before_filtering
+run_test "family exclusion preserves unaffected repo-wide specs" test_family_exclusion_preserves_unaffected_repo_wide_specs
+run_test "explicit family resolution is deterministic across runs" test_explicit_family_resolution_is_deterministic_across_runs
 run_test "empty result after family exclusions is valid" test_empty_result_after_family_exclusions_is_valid
 run_test "fully excluded repo still participates in coverage audit" test_fully_excluded_repo_still_participates_in_coverage_audit
 run_test "custom local family lists and deploys" test_custom_local_family_lists_and_deploys
