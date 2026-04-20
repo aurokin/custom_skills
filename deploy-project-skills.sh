@@ -258,6 +258,171 @@ dedupe_families() {
     families_ref=("${deduped[@]}")
 }
 
+filter_excluded_specs() {
+    local specs_name="$1"
+    local excludes_name="$2"
+    local target_name="$3"
+    local -n specs_ref="$specs_name"
+    local -n excludes_ref="$excludes_name"
+    local -n target_ref="$target_name"
+    local spec
+    local -A excluded_lookup=()
+
+    target_ref=()
+    for spec in "${excludes_ref[@]}"; do
+        excluded_lookup["$spec"]=1
+    done
+
+    for spec in "${specs_ref[@]}"; do
+        if [[ -n "${excluded_lookup[$spec]:-}" ]]; then
+            continue
+        fi
+        target_ref+=("$spec")
+    done
+}
+
+expand_full_repo_specs() {
+    local -n specs_ref="$1"
+    local -n expanded_specs_ref="$2"
+    local spec repo skill_name
+    local upstream_skill_names
+
+    expanded_specs_ref=()
+    for spec in "${specs_ref[@]}"; do
+        if spec_has_explicit_skill "$spec"; then
+            expanded_specs_ref+=("$spec")
+            continue
+        fi
+
+        repo="$(spec_repo "$spec")"
+        if ! command -v git >/dev/null 2>&1; then
+            echo "Cannot expand repo-wide skill spec without git: $repo" >&2
+            return 1
+        fi
+
+        if ! upstream_skill_names="$(collect_upstream_skill_names "$repo" | sort -u)"; then
+            echo "Failed to expand repo-wide skill spec: $repo" >&2
+            return 1
+        fi
+
+        while IFS= read -r skill_name; do
+            [ -z "$skill_name" ] && continue
+            expanded_specs_ref+=("$repo@$skill_name")
+        done <<< "$upstream_skill_names"
+    done
+}
+
+resolve_curated_family_specs() {
+    local family_name="$1"
+    local family_specs_name="$2"
+    local target_name="$3"
+    local -n family_specs_ref="$family_specs_name"
+    local -n target_ref="$target_name"
+    local family_excluded_specs=()
+    local expanded_family_specs=()
+    local filtered_family_specs=()
+    local spec repo
+    local -A surviving_lookup=()
+    local -A expanded_counts=()
+    local -A filtered_counts=()
+    local -A repo_explicit_specs=()
+    local -A repo_should_preserve_wide=()
+    local -A repo_emitted=()
+    local repo_specs=()
+
+    load_local_family_exclude_specs "$family_name" family_excluded_specs || return 1
+    if [ "${#family_excluded_specs[@]}" -eq 0 ]; then
+        target_ref=("${family_specs_ref[@]}")
+        return 0
+    fi
+
+    expand_full_repo_specs family_specs_ref expanded_family_specs || return 1
+    filter_excluded_specs expanded_family_specs family_excluded_specs filtered_family_specs
+
+    for spec in "${expanded_family_specs[@]}"; do
+        repo="$(spec_repo "$spec")"
+        expanded_counts["$repo"]=$(( ${expanded_counts[$repo]:-0} + 1 ))
+    done
+
+    for spec in "${filtered_family_specs[@]}"; do
+        repo="$(spec_repo "$spec")"
+        surviving_lookup["$spec"]=1
+        filtered_counts["$repo"]=$(( ${filtered_counts[$repo]:-0} + 1 ))
+        if [[ -z "${repo_explicit_specs[$repo]:-}" ]]; then
+            repo_explicit_specs["$repo"]="$spec"
+        else
+            repo_explicit_specs["$repo"]+=" $spec"
+        fi
+    done
+
+    for spec in "${family_specs_ref[@]}"; do
+        if spec_has_explicit_skill "$spec"; then
+            continue
+        fi
+
+        repo="$(spec_repo "$spec")"
+        if [ "${filtered_counts[$repo]:-0}" -eq "${expanded_counts[$repo]:-0}" ]; then
+            repo_should_preserve_wide["$repo"]=1
+        fi
+    done
+
+    target_ref=()
+    for spec in "${family_specs_ref[@]}"; do
+        repo="$(spec_repo "$spec")"
+
+        if ! spec_has_explicit_skill "$spec"; then
+            if [[ -n "${repo_emitted[$repo]:-}" ]]; then
+                continue
+            fi
+
+            if [[ -n "${repo_should_preserve_wide[$repo]:-}" ]]; then
+                target_ref+=("$repo")
+            elif [[ -n "${repo_explicit_specs[$repo]:-}" ]]; then
+                IFS=' ' read -r -a repo_specs <<< "${repo_explicit_specs[$repo]}"
+                target_ref+=("${repo_specs[@]}")
+            fi
+
+            repo_emitted["$repo"]=1
+            continue
+        fi
+
+        if [[ -n "${repo_should_preserve_wide[$repo]:-}" ]]; then
+            continue
+        fi
+
+        if [[ -n "${surviving_lookup[$spec]:-}" ]]; then
+            target_ref+=("$spec")
+        fi
+    done
+
+    dedupe_array "$target_name"
+}
+
+load_deploy_specs_for_families() {
+    local family_names_name="$1"
+    local target_name="$2"
+    local -n family_names_ref="$family_names_name"
+    local -n target_ref="$target_name"
+    local family_name
+    local family_specs=()
+    local resolved_family_specs=()
+
+    target_ref=()
+    for family_name in "${family_names_ref[@]}"; do
+        load_family_specs "$family_name" family_specs || return 1
+
+        if curated_family_exists "$family_name"; then
+            resolve_curated_family_specs "$family_name" family_specs resolved_family_specs || return 1
+        else
+            resolved_family_specs=("${family_specs[@]}")
+        fi
+
+        target_ref+=("${resolved_family_specs[@]}")
+    done
+
+    dedupe_array "$target_name"
+}
+
 build_repo_batches() {
     local -n specs_ref="$1"
     local -n repo_order_ref="$2"
@@ -287,6 +452,85 @@ build_repo_batches() {
             fi
         fi
     done
+}
+
+append_specs_to_repo_skill_map() {
+    local specs_name="$1"
+    local target_name="$2"
+    local -n specs_ref="$specs_name"
+    local -n target_ref="$target_name"
+    local spec repo skill_name
+
+    for spec in "${specs_ref[@]}"; do
+        repo="$(spec_repo "$spec")"
+        skill_name="$(spec_skill "$spec")"
+        if [ -z "$skill_name" ]; then
+            continue
+        fi
+        if [[ -z "${target_ref[$repo]:-}" ]]; then
+            target_ref["$repo"]="$skill_name"
+        else
+            target_ref["$repo"]+=" $skill_name"
+        fi
+    done
+}
+
+mark_repos_from_specs() {
+    local specs_name="$1"
+    local target_name="$2"
+    local -n specs_ref="$specs_name"
+    local -n target_ref="$target_name"
+    local spec repo
+
+    for spec in "${specs_ref[@]}"; do
+        repo="$(spec_repo "$spec")"
+        target_ref["$repo"]=1
+    done
+}
+
+collect_effective_family_excluded_specs() {
+    local family_names_name="$1"
+    local final_specs_name="$2"
+    local target_name="$3"
+    local -n family_names_ref="$family_names_name"
+    local -n final_specs_ref="$final_specs_name"
+    local -n target_ref="$target_name"
+    local family_name
+    local family_excluded_specs=()
+    local spec repo
+    local -A final_explicit_lookup=()
+    local -A final_repo_install_all=()
+
+    target_ref=()
+
+    for spec in "${final_specs_ref[@]}"; do
+        repo="$(spec_repo "$spec")"
+        if spec_has_explicit_skill "$spec"; then
+            final_explicit_lookup["$spec"]=1
+        else
+            final_repo_install_all["$repo"]=1
+        fi
+    done
+
+    for family_name in "${family_names_ref[@]}"; do
+        if ! curated_family_exists "$family_name"; then
+            continue
+        fi
+
+        load_local_family_exclude_specs "$family_name" family_excluded_specs || return 1
+        for spec in "${family_excluded_specs[@]}"; do
+            repo="$(spec_repo "$spec")"
+            if [[ -n "${final_repo_install_all[$repo]:-}" ]]; then
+                continue
+            fi
+            if [[ -n "${final_explicit_lookup[$spec]:-}" ]]; then
+                continue
+            fi
+            target_ref+=("$spec")
+        done
+    done
+
+    dedupe_array "$target_name"
 }
 
 main() {
@@ -429,9 +673,13 @@ main() {
     fi
 
     local specs=()
-    load_specs_for_families families specs
+    load_deploy_specs_for_families families specs
+
+    local excluded_specs=()
+    collect_effective_family_excluded_specs families specs excluded_specs || exit 1
 
     local -A declared_by_repo=()
+    local -A audited_family_repos=()
     local spec repo skill_name
     for spec in "${specs[@]}"; do
         repo="$(spec_repo "$spec")"
@@ -446,6 +694,8 @@ main() {
             fi
         fi
     done
+    mark_repos_from_specs specs audited_family_repos
+    mark_repos_from_specs excluded_specs audited_family_repos
 
     local -a coverage_repos=()
     local -A ignored_by_repo=()
@@ -460,6 +710,7 @@ main() {
             warn "Skipping family repo coverage audit because manifest is invalid: $FAMILY_UPSTREAM_COVERAGE_FILE"
         fi
     fi
+    append_specs_to_repo_skill_map excluded_specs ignored_by_repo
 
     local repo_order=()
     local -A specs_by_repo=()
@@ -493,15 +744,15 @@ main() {
         local audit_warnings=0
         local audit_failures=0
         for coverage_repo in "${coverage_repos[@]}"; do
-            if [[ -z "${declared_by_repo[$coverage_repo]:-}" ]]; then
+            if [[ -z "${audited_family_repos[$coverage_repo]:-}" ]]; then
                 continue
             fi
-            if [[ "${declared_by_repo[$coverage_repo]}" == "__ALL__" ]]; then
+            if [[ "${declared_by_repo[$coverage_repo]:-}" == "__ALL__" ]]; then
                 continue
             fi
             if audit_repo_skill_coverage \
                 "$coverage_repo" \
-                "${declared_by_repo[$coverage_repo]}" \
+                "${declared_by_repo[$coverage_repo]:-}" \
                 "${ignored_by_repo[$coverage_repo]:-}"; then
                 :
             else

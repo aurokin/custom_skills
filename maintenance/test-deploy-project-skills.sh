@@ -233,6 +233,10 @@ EOF
 
 setup_test_env() {
     TEST_ROOT="$(mktemp -d)"
+    TEST_ROOT="$(
+        cd "$TEST_ROOT"
+        pwd -P
+    )"
     TEST_HOME="$TEST_ROOT/home"
     PROJECT_ROOT="$TEST_ROOT/project"
     NESTED_TARGET="$PROJECT_ROOT/apps/mobile"
@@ -600,6 +604,89 @@ EOF
     assert_log_contains "add|openai/skills|agents=codex opencode gemini-cli github-copilot claude-code|skills=<all>|copy=1|yes=1"
 }
 
+test_invalid_exclude_family_specs_schema_fails_fast() {
+    local local_config_file="$TEST_ROOT/.skills.local.json"
+    cat > "$local_config_file" <<'EOF'
+{
+  "excludeFamilySpecs": []
+}
+EOF
+
+    if (
+        cd "$REPO_DIR"
+        LOCAL_SKILLS_CONFIG_FILE="$local_config_file" \
+        SKILLS_BIN="$TEST_ROOT/bin/skills" \
+        SKILLS_AUDIT_REPO_COVERAGE=0 \
+        "$DEPLOY_SCRIPT" \
+            --target "$PLAIN_TARGET" \
+            --family expo \
+            --yes
+    ) > "$OUTPUT_FILE" 2>&1; then
+        fail "expected deploy script to reject invalid excludeFamilySpecs schema"
+    fi
+
+    assert_contains "$OUTPUT_FILE" "Invalid local skills config in $local_config_file"
+    assert_log_not_contains "add|"
+}
+
+test_unknown_exclude_family_key_fails_fast() {
+    local local_config_file="$TEST_ROOT/.skills.local.json"
+    cat > "$local_config_file" <<'EOF'
+{
+  "excludeFamilySpecs": {
+    "ghost": [
+      "expo/skills@expo-cicd-workflows"
+    ]
+  }
+}
+EOF
+
+    if (
+        cd "$REPO_DIR"
+        LOCAL_SKILLS_CONFIG_FILE="$local_config_file" \
+        SKILLS_BIN="$TEST_ROOT/bin/skills" \
+        SKILLS_AUDIT_REPO_COVERAGE=0 \
+        "$DEPLOY_SCRIPT" \
+            --target "$PLAIN_TARGET" \
+            --family expo \
+            --yes
+    ) > "$OUTPUT_FILE" 2>&1; then
+        fail "expected unknown excludeFamilySpecs family to fail validation"
+    fi
+
+    assert_contains "$OUTPUT_FILE" "Unknown curated family in $local_config_file:excludeFamilySpecs.ghost"
+    assert_log_not_contains "add|"
+}
+
+test_exclude_family_specs_require_explicit_skills() {
+    local local_config_file="$TEST_ROOT/.skills.local.json"
+    cat > "$local_config_file" <<'EOF'
+{
+  "excludeFamilySpecs": {
+    "expo": [
+      "expo/skills"
+    ]
+  }
+}
+EOF
+
+    if (
+        cd "$REPO_DIR"
+        LOCAL_SKILLS_CONFIG_FILE="$local_config_file" \
+        SKILLS_BIN="$TEST_ROOT/bin/skills" \
+        SKILLS_AUDIT_REPO_COVERAGE=0 \
+        "$DEPLOY_SCRIPT" \
+            --target "$PLAIN_TARGET" \
+            --family expo \
+            --yes
+    ) > "$OUTPUT_FILE" 2>&1; then
+        fail "expected repo-wide excludeFamilySpecs entry to fail validation"
+    fi
+
+    assert_contains "$OUTPUT_FILE" "Explicit skill spec required in $local_config_file:excludeFamilySpecs[expo][0]: expo/skills"
+    assert_log_not_contains "add|"
+}
+
 test_local_family_specs_extend_curated_family() {
     local local_config_file="$TEST_ROOT/.skills.local.json"
     cat > "$local_config_file" <<'EOF'
@@ -626,6 +713,250 @@ EOF
     assert_contains "$OUTPUT_FILE" "Families: expo"
     assert_log_contains "add|expo/skills|agents=codex opencode gemini-cli github-copilot claude-code|skills=building-native-ui expo-api-routes expo-cicd-workflows expo-deployment expo-dev-client expo-tailwind-setup native-data-fetching upgrading-expo use-dom|copy=1|yes=1"
     assert_log_contains "add|acme/mobile-skills|agents=codex opencode gemini-cli github-copilot claude-code|skills=expo-internals|copy=1|yes=1"
+}
+
+test_family_exclusion_removes_curated_skill() {
+    local local_config_file="$TEST_ROOT/.skills.local.json"
+    cat > "$local_config_file" <<'EOF'
+{
+  "excludeFamilySpecs": {
+    "expo": [
+      "expo/skills@expo-cicd-workflows"
+    ]
+  }
+}
+EOF
+
+    (
+        cd "$REPO_DIR"
+        LOCAL_SKILLS_CONFIG_FILE="$local_config_file" \
+        SKILLS_BIN="$TEST_ROOT/bin/skills" \
+        SKILLS_AUDIT_REPO_COVERAGE=0 \
+        "$DEPLOY_SCRIPT" \
+            --target "$PLAIN_TARGET" \
+            --family expo \
+            --yes
+    ) > "$OUTPUT_FILE" 2>&1
+
+    assert_contains "$OUTPUT_FILE" "Families: expo"
+    assert_log_contains "add|expo/skills|agents=codex opencode gemini-cli github-copilot claude-code|skills=building-native-ui expo-api-routes expo-deployment expo-dev-client expo-tailwind-setup native-data-fetching upgrading-expo use-dom|copy=1|yes=1"
+    assert_log_not_contains "expo-cicd-workflows"
+}
+
+test_family_exclusion_removes_locally_added_spec() {
+    local local_config_file="$TEST_ROOT/.skills.local.json"
+    cat > "$local_config_file" <<'EOF'
+{
+  "familySpecs": {
+    "expo": [
+      "acme/mobile-skills@expo-internals"
+    ]
+  },
+  "excludeFamilySpecs": {
+    "expo": [
+      "acme/mobile-skills@expo-internals"
+    ]
+  }
+}
+EOF
+
+    (
+        cd "$REPO_DIR"
+        LOCAL_SKILLS_CONFIG_FILE="$local_config_file" \
+        SKILLS_BIN="$TEST_ROOT/bin/skills" \
+        SKILLS_AUDIT_REPO_COVERAGE=0 \
+        "$DEPLOY_SCRIPT" \
+            --target "$PLAIN_TARGET" \
+            --family expo \
+            --yes
+    ) > "$OUTPUT_FILE" 2>&1
+
+    assert_contains "$OUTPUT_FILE" "Families: expo"
+    assert_log_contains "add|expo/skills|agents=codex opencode gemini-cli github-copilot claude-code|skills=building-native-ui expo-api-routes expo-cicd-workflows expo-deployment expo-dev-client expo-tailwind-setup native-data-fetching upgrading-expo use-dom|copy=1|yes=1"
+    assert_log_not_contains "add|acme/mobile-skills|"
+}
+
+test_family_exclusion_is_scoped_per_family() {
+    local overlap_catalog="$TEST_ROOT/overlap-catalog"
+    local local_config_file="$TEST_ROOT/.skills.local.json"
+
+    mkdir -p "$overlap_catalog/families"
+    cat > "$overlap_catalog/families.tsv" <<'EOF'
+alpha	Alpha family
+beta	Beta family
+EOF
+    cat > "$overlap_catalog/families/alpha.txt" <<'EOF'
+acme/shared-skills@shared-workflow
+acme/shared-skills@alpha-only
+EOF
+    cat > "$overlap_catalog/families/beta.txt" <<'EOF'
+acme/shared-skills@shared-workflow
+acme/shared-skills@beta-only
+EOF
+    cat > "$local_config_file" <<'EOF'
+{
+  "excludeFamilySpecs": {
+    "alpha": [
+      "acme/shared-skills@shared-workflow"
+    ]
+  }
+}
+EOF
+
+    (
+        cd "$REPO_DIR"
+        SKILL_CATALOG_DIR="$overlap_catalog" \
+        LOCAL_SKILLS_CONFIG_FILE="$local_config_file" \
+        SKILLS_BIN="$TEST_ROOT/bin/skills" \
+        SKILLS_AUDIT_REPO_COVERAGE=0 \
+        "$DEPLOY_SCRIPT" \
+            --target "$PLAIN_TARGET" \
+            --family alpha \
+            --family beta \
+            --yes
+    ) > "$OUTPUT_FILE" 2>&1
+
+    assert_contains "$OUTPUT_FILE" "Families: alpha beta"
+    assert_log_contains "add|acme/shared-skills|agents=codex opencode gemini-cli github-copilot claude-code|skills=alpha-only shared-workflow beta-only|copy=1|yes=1"
+}
+
+test_repo_wide_family_exclusion_normalizes_before_filtering() {
+    local wide_catalog="$TEST_ROOT/wide-exclusion-catalog"
+    local local_config_file="$TEST_ROOT/.skills.local.json"
+    local shared_repo_root="$MOCK_REPOS/acme/shared-skills"
+
+    mkdir -p "$wide_catalog/families" "$shared_repo_root"
+    create_mock_skill_file "$shared_repo_root" "alpha"
+    create_mock_skill_file "$shared_repo_root" "beta"
+    create_mock_skill_file "$shared_repo_root" "gamma"
+
+    cat > "$wide_catalog/families.tsv" <<'EOF'
+wide	Wide family
+EOF
+    cat > "$wide_catalog/families/wide.txt" <<'EOF'
+acme/shared-skills
+EOF
+    cat > "$local_config_file" <<'EOF'
+{
+  "excludeFamilySpecs": {
+    "wide": [
+      "acme/shared-skills@beta"
+    ]
+  }
+}
+EOF
+
+    (
+        cd "$REPO_DIR"
+        SKILL_CATALOG_DIR="$wide_catalog" \
+        LOCAL_SKILLS_CONFIG_FILE="$local_config_file" \
+        SKILLS_BIN="$TEST_ROOT/bin/skills" \
+        SKILLS_AUDIT_REPO_COVERAGE=0 \
+        "$DEPLOY_SCRIPT" \
+            --target "$PLAIN_TARGET" \
+            --family wide \
+            --yes
+    ) > "$OUTPUT_FILE" 2>&1
+
+    assert_contains "$OUTPUT_FILE" "Families: wide"
+    assert_contains "$OUTPUT_FILE" "acme/shared-skills: alpha gamma"
+    assert_log_contains "add|acme/shared-skills|agents=codex opencode gemini-cli github-copilot claude-code|skills=alpha gamma|copy=1|yes=1"
+    assert_log_not_contains "skills=<all>"
+    assert_log_not_contains "skills=alpha beta gamma"
+}
+
+test_empty_result_after_family_exclusions_is_valid() {
+    local empty_catalog="$TEST_ROOT/empty-catalog"
+    local local_config_file="$TEST_ROOT/.skills.local.json"
+
+    mkdir -p "$empty_catalog/families"
+    cat > "$empty_catalog/families.tsv" <<'EOF'
+solo	Solo family
+EOF
+    cat > "$empty_catalog/families/solo.txt" <<'EOF'
+acme/shared-skills@solo-skill
+EOF
+    cat > "$local_config_file" <<'EOF'
+{
+  "excludeFamilySpecs": {
+    "solo": [
+      "acme/shared-skills@solo-skill"
+    ]
+  }
+}
+EOF
+
+    (
+        cd "$REPO_DIR"
+        SKILL_CATALOG_DIR="$empty_catalog" \
+        LOCAL_SKILLS_CONFIG_FILE="$local_config_file" \
+        SKILLS_BIN="$TEST_ROOT/bin/skills" \
+        SKILLS_AUDIT_REPO_COVERAGE=0 \
+        "$DEPLOY_SCRIPT" \
+            --target "$PLAIN_TARGET" \
+            --family solo \
+            --yes
+    ) > "$OUTPUT_FILE" 2>&1
+
+    assert_contains "$OUTPUT_FILE" "Families: solo"
+    assert_contains "$OUTPUT_FILE" "Planned installs:"
+    assert_contains "$OUTPUT_FILE" "Done."
+    assert_log_not_contains "add|"
+}
+
+test_fully_excluded_repo_still_participates_in_coverage_audit() {
+    local empty_catalog="$TEST_ROOT/empty-audit-catalog"
+    local local_config_file="$TEST_ROOT/.skills.local.json"
+    local coverage_manifest="$TEST_ROOT/empty-audit-coverage.json"
+    local shared_repo_root="$MOCK_REPOS/acme/shared-skills"
+
+    mkdir -p "$empty_catalog/families" "$shared_repo_root"
+    cat > "$empty_catalog/families.tsv" <<'EOF'
+solo	Solo family
+EOF
+    cat > "$empty_catalog/families/solo.txt" <<'EOF'
+acme/shared-skills@solo-skill
+EOF
+    cat > "$local_config_file" <<'EOF'
+{
+  "excludeFamilySpecs": {
+    "solo": [
+      "acme/shared-skills@solo-skill"
+    ]
+  }
+}
+EOF
+    cat > "$coverage_manifest" <<'EOF'
+{
+  "repos": [
+    {
+      "repo": "acme/shared-skills",
+      "ignored": []
+    }
+  ]
+}
+EOF
+    create_mock_skill_file "$shared_repo_root" "solo-skill"
+    create_mock_skill_file "$shared_repo_root" "newly-added-skill"
+
+    (
+        cd "$REPO_DIR"
+        PATH="$TEST_ROOT/bin:$ORIGINAL_PATH" \
+        SKILL_CATALOG_DIR="$empty_catalog" \
+        LOCAL_SKILLS_CONFIG_FILE="$local_config_file" \
+        SKILLS_BIN="$TEST_ROOT/bin/skills" \
+        FAMILY_UPSTREAM_COVERAGE_FILE="$coverage_manifest" \
+        "$DEPLOY_SCRIPT" \
+            --target "$PLAIN_TARGET" \
+            --family solo \
+            --yes
+    ) > "$OUTPUT_FILE" 2>&1
+
+    assert_contains "$OUTPUT_FILE" "Auditing curated family repos..."
+    assert_contains "$OUTPUT_FILE" "WARN: Undeclared upstream skill(s) in acme/shared-skills: newly-added-skill"
+    assert_not_contains "$OUTPUT_FILE" "No family coverage drift found."
+    assert_contains "$OUTPUT_FILE" "Done."
+    assert_log_not_contains "add|"
 }
 
 test_custom_local_family_lists_and_deploys() {
@@ -742,6 +1073,37 @@ test_family_audit_warning_nonfatal() {
     assert_log_contains "add|expo/skills|"
 }
 
+test_family_exclusion_is_ignored_in_repo_coverage_audit() {
+    local local_config_file="$TEST_ROOT/.skills.local.json"
+
+    cat > "$local_config_file" <<'EOF'
+{
+  "excludeFamilySpecs": {
+    "expo": [
+      "expo/skills@expo-cicd-workflows"
+    ]
+  }
+}
+EOF
+
+    (
+        cd "$REPO_DIR"
+        PATH="$TEST_ROOT/bin:$ORIGINAL_PATH" \
+        LOCAL_SKILLS_CONFIG_FILE="$local_config_file" \
+        SKILLS_BIN="$TEST_ROOT/bin/skills" \
+        FAMILY_UPSTREAM_COVERAGE_FILE="$FAMILY_MANIFEST_FILE" \
+        "$DEPLOY_SCRIPT" \
+            --target "$PLAIN_TARGET" \
+            --family expo \
+            --yes
+    ) > "$OUTPUT_FILE" 2>&1
+
+    assert_contains "$OUTPUT_FILE" "Auditing curated family repos..."
+    assert_not_contains "$OUTPUT_FILE" "WARN: Undeclared upstream skill(s) in expo/skills:"
+    assert_contains "$OUTPUT_FILE" "Done."
+    assert_log_contains "add|expo/skills|agents=codex opencode gemini-cli github-copilot claude-code|skills=building-native-ui expo-api-routes expo-deployment expo-dev-client expo-tailwind-setup native-data-fetching upgrading-expo use-dom|copy=1|yes=1"
+}
+
 test_dry_run_skips_audit_and_install() {
     create_mock_skill_file "$MOCK_REPOS/expo/skills" "newly-added-skill"
 
@@ -806,11 +1168,21 @@ run_test "non-interactive custom family reports invalid local config" test_nonin
 run_test "interactive family selection reports invalid local config" test_interactive_family_selection_reports_invalid_local_config
 run_test "all families deploy" test_all_families_deploy
 run_test "repo-wide family spec installs all skills" test_repo_wide_family_spec_installs_all_skills
+run_test "invalid excludeFamilySpecs schema fails fast" test_invalid_exclude_family_specs_schema_fails_fast
+run_test "unknown excludeFamilySpecs family fails fast" test_unknown_exclude_family_key_fails_fast
+run_test "excludeFamilySpecs entries must be explicit skills" test_exclude_family_specs_require_explicit_skills
 run_test "local family specs extend curated family" test_local_family_specs_extend_curated_family
+run_test "family exclusion removes curated skill" test_family_exclusion_removes_curated_skill
+run_test "family exclusion removes locally added spec" test_family_exclusion_removes_locally_added_spec
+run_test "family exclusion is scoped per family" test_family_exclusion_is_scoped_per_family
+run_test "repo-wide family exclusion normalizes before filtering" test_repo_wide_family_exclusion_normalizes_before_filtering
+run_test "empty result after family exclusions is valid" test_empty_result_after_family_exclusions_is_valid
+run_test "fully excluded repo still participates in coverage audit" test_fully_excluded_repo_still_participates_in_coverage_audit
 run_test "custom local family lists and deploys" test_custom_local_family_lists_and_deploys
 run_test "custom local family rejects empty specs" test_custom_local_family_rejects_empty_specs
 run_test "custom local family rejects multiline description" test_custom_local_family_rejects_multiline_description
 run_test "family audit warning is non-fatal" test_family_audit_warning_nonfatal
+run_test "family exclusion is ignored in repo coverage audit" test_family_exclusion_is_ignored_in_repo_coverage_audit
 run_test "dry run skips audit and install" test_dry_run_skips_audit_and_install
 run_test "invalid catalog spec fails fast" test_invalid_catalog_spec_fails_fast
 
