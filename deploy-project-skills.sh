@@ -258,6 +258,56 @@ dedupe_families() {
     families_ref=("${deduped[@]}")
 }
 
+filter_excluded_specs() {
+    local specs_name="$1"
+    local excludes_name="$2"
+    local target_name="$3"
+    local -n specs_ref="$specs_name"
+    local -n excludes_ref="$excludes_name"
+    local -n target_ref="$target_name"
+    local spec
+    local -A excluded_lookup=()
+
+    target_ref=()
+    for spec in "${excludes_ref[@]}"; do
+        excluded_lookup["$spec"]=1
+    done
+
+    for spec in "${specs_ref[@]}"; do
+        if [[ -n "${excluded_lookup[$spec]:-}" ]]; then
+            continue
+        fi
+        target_ref+=("$spec")
+    done
+}
+
+load_deploy_specs_for_families() {
+    local family_names_name="$1"
+    local target_name="$2"
+    local -n family_names_ref="$family_names_name"
+    local -n target_ref="$target_name"
+    local family_name
+    local family_specs=()
+    local family_excluded_specs=()
+    local resolved_family_specs=()
+
+    target_ref=()
+    for family_name in "${family_names_ref[@]}"; do
+        load_family_specs "$family_name" family_specs || return 1
+
+        if curated_family_exists "$family_name"; then
+            load_local_family_exclude_specs "$family_name" family_excluded_specs || return 1
+            filter_excluded_specs family_specs family_excluded_specs resolved_family_specs
+        else
+            resolved_family_specs=("${family_specs[@]}")
+        fi
+
+        target_ref+=("${resolved_family_specs[@]}")
+    done
+
+    dedupe_array "$target_name"
+}
+
 build_repo_batches() {
     local -n specs_ref="$1"
     local -n repo_order_ref="$2"
@@ -429,7 +479,7 @@ main() {
     fi
 
     local specs=()
-    load_specs_for_families families specs
+    load_deploy_specs_for_families families specs
 
     local -A declared_by_repo=()
     local spec repo skill_name

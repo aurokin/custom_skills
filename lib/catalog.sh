@@ -184,8 +184,10 @@ ensure_local_skills_config_valid() {
         ((.globalSpecs // []) | type == "array") and
         ((.excludeGlobalSpecs // []) | type == "array") and
         ((.familySpecs // {}) | type == "object") and
+        ((.excludeFamilySpecs // {}) | type == "object") and
         ((.customFamilies // {}) | type == "object") and
         all((.familySpecs // {})[]?; type == "array") and
+        all((.excludeFamilySpecs // {})[]?; type == "array") and
         all((.customFamilies // {})[]?;
             type == "object" and
             (.description | type == "string") and
@@ -223,6 +225,15 @@ ensure_local_skills_config_valid() {
         fi
     done < <(jq -r '(.familySpecs // {}) | keys_unsorted[]?' "$config_file")
 
+    while IFS= read -r family_name; do
+        [ -z "$family_name" ] && continue
+        validate_family_name "$family_name" "$config_file" "excludeFamilySpecs.$family_name" || return 2
+        if ! curated_family_exists "$family_name"; then
+            echo "Unknown curated family in $config_file:excludeFamilySpecs.$family_name" >&2
+            return 2
+        fi
+    done < <(jq -r '(.excludeFamilySpecs // {}) | keys_unsorted[]?' "$config_file")
+
     while IFS=$'\t' read -r field_name spec; do
         [ -z "$field_name" ] && continue
         validate_spec_line "$spec" "$config_file" "$field_name" || return 2
@@ -232,6 +243,17 @@ ensure_local_skills_config_valid() {
         | $family.value
         | to_entries[]
         | "familySpecs[\($family.key)][\(.key)]\t\(.value)"
+    ' "$config_file")
+
+    while IFS=$'\t' read -r field_name spec; do
+        [ -z "$field_name" ] && continue
+        validate_explicit_spec_line "$spec" "$config_file" "$field_name" || return 2
+    done < <(jq -r '
+        (.excludeFamilySpecs // {})
+        | to_entries[] as $family
+        | $family.value
+        | to_entries[]
+        | "excludeFamilySpecs[\($family.key)][\(.key)]\t\(.value)"
     ' "$config_file")
 
     while IFS= read -r custom_family_entry; do
@@ -313,6 +335,33 @@ load_local_global_exclude_specs() {
         [ -z "$spec" ] && continue
         target_ref+=("$spec")
     done < <(jq -r '.excludeGlobalSpecs[]?' "$LOCAL_SKILLS_CONFIG_FILE")
+
+    dedupe_array "$target_name"
+}
+
+load_local_family_exclude_specs() {
+    local family_name="$1"
+    local target_name="$2"
+    local -n target_ref="$target_name"
+    local status=0
+    local spec
+
+    target_ref=()
+
+    if ensure_local_skills_config_valid; then
+        status=0
+    else
+        status=$?
+        if [ "$status" -eq 1 ]; then
+            return 0
+        fi
+        return 1
+    fi
+
+    while IFS= read -r spec; do
+        [ -z "$spec" ] && continue
+        target_ref+=("$spec")
+    done < <(jq -r --arg family_name "$family_name" '.excludeFamilySpecs[$family_name][]?' "$LOCAL_SKILLS_CONFIG_FILE")
 
     dedupe_array "$target_name"
 }
