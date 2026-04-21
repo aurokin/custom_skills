@@ -39,10 +39,9 @@ whole upstream repos after normalization, from that resolved global set before
 stale-skill removal runs.
 
 Exclusion-override behavior, resolved repo summaries, and the `^` full-coverage
-marker are documented in [docs/exclude-overrides.md](docs/exclude-overrides.md)
-and [docs/exclude-overrides-plan.md](docs/exclude-overrides-plan.md). The `^`
-marker means the final resolved set covers all current upstream skills for that
-repo.
+marker are documented in [docs/exclude-overrides.md](docs/exclude-overrides.md).
+The `^` marker means the final resolved set covers all current upstream skills
+for that repo.
 
 Examples:
 
@@ -78,10 +77,9 @@ its `excludeFamilySpecs` remove explicit upstream skills from each curated
 family's resolved contribution before the selected families are merged.
 
 Exclusion-override behavior, resolved repo summaries, and the `^` full-coverage
-marker are documented in [docs/exclude-overrides.md](docs/exclude-overrides.md)
-and [docs/exclude-overrides-plan.md](docs/exclude-overrides-plan.md). The `^`
-marker means the final resolved set covers all current upstream skills for that
-repo.
+marker are documented in [docs/exclude-overrides.md](docs/exclude-overrides.md).
+The `^` marker means the final resolved set covers all current upstream skills
+for that repo.
 
 Interactive mode:
 
@@ -149,7 +147,9 @@ Current project families:
 
 Create `.skills.local.json` in the repo root to add personal skills without
 changing the curated catalog. The file is gitignored; start from
-`.skills.local.json.example`.
+`.skills.local.json.example`. The example file uses placeholder exclusions, so
+copying it does not opt you out of curated skills until you replace those
+values intentionally.
 
 Supported keys:
 
@@ -165,9 +165,8 @@ Supported keys:
   new family definitions with `description` and `specs`
 
 See [docs/exclude-overrides.md](docs/exclude-overrides.md) for the implemented
-exclusion-override semantics, normalization rules, resolved summary output, and
-examples. See [docs/exclude-overrides-plan.md](docs/exclude-overrides-plan.md)
-for the implementation shape and test scope that back those behaviors.
+exclusion-override semantics, normalization rules, resolved summary output,
+examples, and implementation notes.
 
 Example:
 

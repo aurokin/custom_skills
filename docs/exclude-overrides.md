@@ -112,6 +112,36 @@ out of the final resolved set even if it was also added locally.
   may resolve to zero skills after exclusions. In those cases the summary
   prints `(none)` and the command continues successfully.
 
+## Implementation Notes
+
+- Global sync resolves to a final explicit post-exclusion set. That explicit
+  set drives stale removal, install batching, summaries, and coverage audit.
+- Family deploy resolves to a final post-exclusion deploy set. If exclusions do
+  not narrow a repo-wide family spec, the deploy set can keep the repo-wide
+  `owner/repo` entry. If exclusions narrow that repo, the deploy set falls back
+  to explicit surviving skills for that repo.
+- Resolved repo summaries and coverage audit operate on the effective
+  post-exclusion desired state, so intentionally excluded skills do not appear
+  as drift and summary lines remain interpretable even when deploy batching
+  preserves repo-wide specs.
+- Upstream enumeration is reused within one invocation across normalization,
+  summary generation, and coverage audit.
+- `excludeFamilySpecs` does not apply to `customFamilies`; custom families are
+  additive only.
+
+## Verification Notes
+
+- The shell integration suites in
+  [maintenance/test-install-repro-skills.sh](/Users/auro/code/custom_skills/maintenance/test-install-repro-skills.sh)
+  and
+  [maintenance/test-deploy-project-skills.sh](/Users/auro/code/custom_skills/maintenance/test-deploy-project-skills.sh)
+  cover exclusion precedence, repo-wide normalization, empty results, resolved
+  summaries, `^` marker behavior, validation failures, and exclusion-aware
+  coverage audit.
+- These tests assert observable behavior and exact CLI arguments rather than
+  internal helper structure, which keeps the documented guarantees tied to the
+  actual command surface.
+
 ## Examples
 
 Global explicit include plus explicit exclude:
