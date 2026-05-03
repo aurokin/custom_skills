@@ -20,3 +20,11 @@ This skill takes the designated files the user has passed you that are already o
 6. Show the user your plan in a concise report stating which project you will upload to, along with a hierarchical bullet list that starts with the milestone and places the issues underneath it. Represent the relationships between issues unless doing so would make the report too complicated.
 
 7. Once the user confirms, upload to Linear using the Linear MCP.
+
+## Linear Upload Expectations
+
+1. We expect that the relationships are formed inside linear and the markdown descriptions are removed
+
+2. We expect that the PRD is the milestone's description
+
+3. We expect that each issue is a coherent unit, an agent should be able to look at the issue, the attached milestone, and the linked issues to formulate a plan that will fulfill the issues need.
