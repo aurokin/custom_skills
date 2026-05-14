@@ -7,10 +7,20 @@ shopt -s nullglob
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILLS_DIR="$SCRIPT_DIR/skills"
+
+# shellcheck source=lib/agents.sh
+source "$SCRIPT_DIR/lib/agents.sh"
+
+skills_agents=()
+compute_skills_agents skills_agents
+
 SKILL_TARGET_DIRS=(
     "$HOME/.agents/skills"
     "$HOME/.claude/skills"
 )
+if agents_include_hermes skills_agents; then
+    SKILL_TARGET_DIRS+=("$HOME/.hermes/skills")
+fi
 SKILL_PATHS=("$SKILLS_DIR"/*/)
 
 declare -A LOCAL_SKILL_NAMES=()

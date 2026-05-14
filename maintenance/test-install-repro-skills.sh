@@ -155,6 +155,7 @@ seed_default_mock_repos() {
     local vercel_skills_root="$MOCK_REPOS/vercel-labs/skills"
     local raindrop_root="$MOCK_REPOS/dedene/raindrop-cli"
     local matt_root="$MOCK_REPOS/mattpocock/skills"
+    local humanizer_root="$MOCK_REPOS/blader/humanizer"
 
     mkdir -p \
         "$agent_browser_root" \
@@ -165,7 +166,8 @@ seed_default_mock_repos() {
         "$agent_skills_root" \
         "$vercel_skills_root" \
         "$raindrop_root" \
-        "$matt_root"
+        "$matt_root" \
+        "$humanizer_root"
 
     create_mock_skill_file "$anthropics_skills_root" "frontend-design"
     create_mock_skill_file "$anthropics_skills_root" "webapp-testing"
@@ -195,6 +197,7 @@ seed_default_mock_repos() {
     create_mock_skill_file "$vercel_skills_root" "find-skills"
     create_mock_skill_file "$raindrop_root" "raindrop-cli"
     create_mock_skill_file "$matt_root" "grill-me"
+    create_mock_skill_file "$humanizer_root" "humanizer"
 }
 
 write_fake_skills_cli() {
@@ -259,10 +262,18 @@ PY
         ;;
     remove)
         name=""
+        agents=()
         while [ "$#" -gt 0 ]; do
             case "$1" in
                 -g|--global|-y|--yes)
                     shift
+                    ;;
+                -a|--agent)
+                    shift
+                    while [ "$#" -gt 0 ] && [[ "$1" != -* ]]; do
+                        agents+=("$1")
+                        shift
+                    done
                     ;;
                 *)
                     name="$1"
@@ -274,7 +285,7 @@ PY
             echo "missing skill name for remove" >&2
             exit 1
         fi
-        printf 'remove|%s\n' "$name" >> "$log_file"
+        printf 'remove|%s|agents=%s\n' "$name" "${agents[*]}" >> "$log_file"
         grep -Fvx "$name" "$state_file" > "$state_file.tmp" || true
         mv "$state_file.tmp" "$state_file"
         ;;
@@ -286,6 +297,7 @@ PY
             exit 1
         fi
         skills=()
+        agents=()
         while [ "$#" -gt 0 ]; do
             case "$1" in
                 -g|--global|-y|--yes)
@@ -294,6 +306,7 @@ PY
                 -a|--agent)
                     shift
                     while [ "$#" -gt 0 ] && [[ "$1" != -* ]]; do
+                        agents+=("$1")
                         shift
                     done
                     ;;
@@ -313,7 +326,7 @@ PY
             echo "missing skill list for add" >&2
             exit 1
         fi
-        printf 'add|%s|%s\n' "$repo" "${skills[*]}" >> "$log_file"
+        printf 'add|%s|%s|agents=%s\n' "$repo" "${skills[*]}" "${agents[*]}" >> "$log_file"
         for skill in "${skills[@]}"; do
             printf '%s\n' "$skill" >> "$state_file"
         done
@@ -526,7 +539,7 @@ EOF
 
     run_sync
 
-    assert_contains "$OUTPUT_FILE" "WARN: No skills/*/SKILL.md files found in acme/audit-only; repo layout may have changed"
+    assert_contains "$OUTPUT_FILE" "WARN: No SKILL.md files found in acme/audit-only; repo layout may have changed"
     assert_contains "$OUTPUT_FILE" "WARN: Skipping upstream repo coverage audit for acme/audit-only"
     assert_contains "$OUTPUT_FILE" "Done."
 }
@@ -1009,8 +1022,98 @@ run_sync_with_env() {
     ) > "$OUTPUT_FILE" 2>&1
 }
 
+test_default_agents_passed_on_add() {
+    run_sync
+
+    assert_log_contains "agents=codex opencode gemini-cli github-copilot claude-code"
+    assert_log_not_contains "hermes-agent"
+}
+
+test_default_does_not_touch_hermes_dir() {
+    mkdir -p "$HOME/.hermes/skills"
+    ln -s "$TEST_ROOT/does-not-exist" "$HOME/.hermes/skills/broken-ours-style"
+
+    run_sync
+
+    if [ ! -L "$HOME/.hermes/skills/broken-ours-style" ]; then
+        fail "expected ~/.hermes/skills to be untouched without hermes-agent opt-in"
+    fi
+}
+
+test_hermes_opt_in_includes_agent_on_add() {
+    run_sync_with_env SKILLS_AGENTS="codex opencode gemini-cli github-copilot claude-code hermes-agent"
+
+    assert_log_contains "agents=codex opencode gemini-cli github-copilot claude-code hermes-agent"
+}
+
+test_hermes_opt_in_scopes_remove_to_non_hermes() {
+    seed_state_with_all_specs
+    printf '%s\n' "rogue-skill" >> "$STATE_FILE"
+
+    run_sync_with_env SKILLS_AGENTS="codex opencode gemini-cli github-copilot claude-code hermes-agent"
+
+    assert_log_contains "remove|rogue-skill|agents=codex opencode gemini-cli github-copilot claude-code"
+    assert_log_not_contains "remove|rogue-skill|agents=codex opencode gemini-cli github-copilot claude-code hermes-agent"
+}
+
+test_hermes_opt_in_sweeps_ours_broken_symlinks() {
+    mkdir -p "$HOME/.hermes/skills"
+    local hermes_dir="$HOME/.hermes/skills"
+    local repo_skill_path="$REPO_DIR/skills/does-not-exist-local"
+    local agents_skill_path="$HOME/.agents/skills/does-not-exist-agents"
+    local external_target="$TEST_ROOT/external"
+    local real_dir="$hermes_dir/hermes-owned-real-dir"
+
+    ln -s "$repo_skill_path" "$hermes_dir/dangling-local"
+    ln -s "$agents_skill_path" "$hermes_dir/dangling-agents-abs"
+    ln -s "../../.agents/skills/does-not-exist-rel" "$hermes_dir/dangling-agents-rel"
+    ln -s "$external_target" "$hermes_dir/dangling-foreign"
+    mkdir -p "$real_dir"
+
+    run_sync_with_env SKILLS_AGENTS="codex opencode gemini-cli github-copilot claude-code hermes-agent"
+
+    assert_not_exists "$hermes_dir/dangling-local"
+    assert_not_exists "$hermes_dir/dangling-agents-abs"
+    assert_not_exists "$hermes_dir/dangling-agents-rel"
+    if [ ! -L "$hermes_dir/dangling-foreign" ]; then
+        fail "expected foreign-target dangling symlink to survive Hermes ours-sweep"
+    fi
+    if [ ! -d "$real_dir" ]; then
+        fail "expected hand-authored real dir to survive Hermes ours-sweep"
+    fi
+}
+
+test_hermes_only_mode_skips_stale_removal() {
+    seed_state_with_all_specs
+    printf '%s\n' "rogue-skill" >> "$STATE_FILE"
+
+    run_sync_with_env SKILLS_AGENTS="hermes-agent"
+
+    assert_contains "$OUTPUT_FILE" "Skipping stale-skill removal (Hermes-only mode"
+    assert_log_not_contains "remove|"
+}
+
+test_hermes_only_mode_still_cleans_owned_broken_symlinks() {
+    seed_state_with_all_specs
+    mkdir -p "$HOME/.agents/skills" "$HOME/.claude/skills"
+    ln -s "$TEST_ROOT/does-not-exist" "$HOME/.agents/skills/broken-link"
+    ln -s "$TEST_ROOT/does-not-exist" "$HOME/.claude/skills/broken-link"
+
+    run_sync_with_env SKILLS_AGENTS="hermes-agent"
+
+    assert_not_exists "$HOME/.agents/skills/broken-link"
+    assert_not_exists "$HOME/.claude/skills/broken-link"
+}
+
 run_test "clean noop" test_clean_noop
 run_test "stale removal and broken symlinks" test_stale_removal_and_broken_symlinks
+run_test "default passes standard agents on add" test_default_agents_passed_on_add
+run_test "default does not touch ~/.hermes/skills" test_default_does_not_touch_hermes_dir
+run_test "hermes opt-in includes hermes-agent on add" test_hermes_opt_in_includes_agent_on_add
+run_test "hermes opt-in scopes remove to non-hermes" test_hermes_opt_in_scopes_remove_to_non_hermes
+run_test "hermes opt-in sweeps ours broken symlinks" test_hermes_opt_in_sweeps_ours_broken_symlinks
+run_test "hermes-only mode skips stale removal" test_hermes_only_mode_skips_stale_removal
+run_test "hermes-only mode still cleans owned broken symlinks" test_hermes_only_mode_still_cleans_owned_broken_symlinks
 run_test "drift warning is non-fatal" test_drift_warning_nonfatal
 run_test "audit clone failure is non-fatal" test_audit_clone_failure_nonfatal
 run_test "layout drift warning is non-fatal" test_layout_drift_warning_nonfatal

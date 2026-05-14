@@ -51,6 +51,55 @@ SKILLS_AGENTS="codex opencode" ./install-repro-skills.sh
 SKILLS_AUDIT_REPO_COVERAGE=0 ./install-repro-skills.sh
 ```
 
+### Agent targets
+
+`SKILLS_AGENTS` is a single space-separated override. When unset, scripts use
+the standard set defined in `lib/agents.sh`:
+
+- `codex`
+- `opencode`
+- `gemini-cli`
+- `github-copilot`
+- `claude-code`
+
+Override the list to scope a run to a subset of agents, or to opt into
+additional agents like Hermes (see below).
+
+### Hermes opt-in
+
+`hermes-agent` is supported as an opt-in target. Include it in `SKILLS_AGENTS`:
+
+```bash
+SKILLS_AGENTS="codex opencode gemini-cli github-copilot claude-code hermes-agent" \
+    ./install-repro-skills.sh
+```
+
+Hermes behavior is intentionally different:
+
+- Hermes does **not** read `~/.agents/skills` by default. The `skills` CLI
+  installs Hermes targets under `~/.hermes/skills/<name>`. Local repo skills
+  are symlinked there by `link-skills.sh` when `hermes-agent` is opted in.
+- `~/.hermes/skills` is treated as **add-only**. Stale-skill removal is scoped
+  with `-a` to non-Hermes agents so the CLI never removes a Hermes entry on
+  our behalf. Hermes packages and creates its own skills in that directory,
+  and we don't manage what we didn't install.
+- We do clean up our own dangling symlinks. After a stale removal, any
+  `~/.hermes/skills/<name>` symlink whose target resolves into `skills/` or
+  `~/.agents/skills/` is removed. Real directories and symlinks pointing
+  elsewhere are left untouched.
+- Without `hermes-agent` in `SKILLS_AGENTS`, scripts never read or write
+  `~/.hermes/skills`. To clean up past Hermes writes after opting out, opt
+  back in for one run.
+- Running with `SKILLS_AGENTS="hermes-agent"` alone is supported but is an
+  edge case: the CLI installs as real directories under `~/.hermes/skills`,
+  which look like Hermes-owned content on disk and won't be cleaned up by
+  future runs. Use the additive form (standard + `hermes-agent`) for any
+  install you want round-trip cleanup on.
+- A fresh Hermes session or `/reset` is needed for Hermes to pick up
+  newly-added skills. Local entries in `~/.hermes/skills` win on name
+  collisions with externally-configured skill roots
+  (`skills.external_dirs` in `~/.hermes/config.yaml`).
+
 ### `./deploy-project-skills.sh`
 
 Deploys curated skill families into a target directory with project-scoped `skills add --copy` installs.
@@ -109,12 +158,17 @@ List available families:
 Symlinks local repo skills from `skills/` into:
 - `~/.agents/skills`
 - `~/.claude/skills`
+- `~/.hermes/skills` — only when `hermes-agent` is in `SKILLS_AGENTS`
 
 Use it when you only want to refresh local repo skills without touching upstream packages.
 
 ```bash
 ./link-skills.sh
 ```
+
+Stale-link cleanup only removes symlinks whose target points back into this
+repo's `skills/` directory. Hand-authored real directories in any target are
+never overwritten.
 
 ### `bash maintenance/sync-agents-md.sh`
 

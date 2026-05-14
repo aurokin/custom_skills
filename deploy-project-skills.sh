@@ -4,14 +4,19 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILLS_BIN="${SKILLS_BIN:-skills}"
-DEFAULT_SKILLS_AGENTS="${SKILLS_AGENTS:-codex opencode gemini-cli github-copilot claude-code}"
 SKILLS_AUDIT_REPO_COVERAGE="${SKILLS_AUDIT_REPO_COVERAGE:-1}"
 FAMILY_UPSTREAM_COVERAGE_FILE="${FAMILY_UPSTREAM_COVERAGE_FILE:-$SCRIPT_DIR/catalog/family-coverage.json}"
 
+# shellcheck source=lib/agents.sh
+source "$SCRIPT_DIR/lib/agents.sh"
 # shellcheck source=lib/catalog.sh
 source "$SCRIPT_DIR/lib/catalog.sh"
 # shellcheck source=lib/upstream-audit.sh
 source "$SCRIPT_DIR/lib/upstream-audit.sh"
+
+default_skills_agents_array=()
+compute_skills_agents default_skills_agents_array
+DEFAULT_SKILLS_AGENTS="${default_skills_agents_array[*]}"
 
 require_cmd() {
     if ! command -v "$1" >/dev/null 2>&1; then

@@ -5,6 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 LINK_SCRIPT="$REPO_DIR/link-skills.sh"
+AGENTS_LIB="$REPO_DIR/lib/agents.sh"
 TESTS_RUN=0
 
 fail() {
@@ -51,9 +52,11 @@ setup_test_env() {
     OUTPUT_FILE="$TEST_ROOT/output.txt"
 
     export HOME
+    unset SKILLS_AGENTS
 
-    mkdir -p "$HOME" "$FIXTURE_REPO/skills"
+    mkdir -p "$HOME" "$FIXTURE_REPO/skills" "$FIXTURE_REPO/lib"
     cp "$LINK_SCRIPT" "$FIXTURE_REPO/link-skills.sh"
+    cp "$AGENTS_LIB" "$FIXTURE_REPO/lib/agents.sh"
     chmod +x "$FIXTURE_REPO/link-skills.sh"
 }
 
@@ -69,6 +72,13 @@ run_link() {
     (
         cd "$FIXTURE_REPO"
         ./link-skills.sh
+    ) > "$OUTPUT_FILE" 2>&1
+}
+
+run_link_with_env() {
+    (
+        cd "$FIXTURE_REPO"
+        env "$@" ./link-skills.sh
     ) > "$OUTPUT_FILE" 2>&1
 }
 
@@ -119,7 +129,65 @@ test_empty_skills_dir_cleans_without_creating_bogus_links() {
     assert_not_exists "$HOME/.claude/skills/plan-reviewer"
 }
 
+test_default_does_not_create_hermes_target() {
+    create_skill_dir "agents-md"
+    mkdir -p "$HOME/.agents/skills" "$HOME/.claude/skills"
+
+    run_link
+
+    if [ -e "$HOME/.hermes/skills/agents-md" ] || [ -L "$HOME/.hermes/skills/agents-md" ]; then
+        fail "expected ~/.hermes/skills/agents-md to be absent without hermes-agent opt-in"
+    fi
+}
+
+test_hermes_opt_in_links_local_skills_into_hermes_dir() {
+    create_skill_dir "agents-md"
+    mkdir -p "$HOME/.agents/skills" "$HOME/.claude/skills" "$HOME/.hermes/skills"
+
+    run_link_with_env SKILLS_AGENTS="codex opencode gemini-cli github-copilot claude-code hermes-agent"
+
+    assert_symlink_target "$HOME/.hermes/skills/agents-md" "$FIXTURE_REPO/skills/agents-md/"
+}
+
+test_hermes_opt_in_removes_stale_local_symlink_from_hermes() {
+    create_skill_dir "agents-md"
+    mkdir -p "$HOME/.agents/skills" "$HOME/.claude/skills" "$HOME/.hermes/skills"
+    ln -s "$FIXTURE_REPO/skills/old-skill/" "$HOME/.hermes/skills/old-skill"
+
+    run_link_with_env SKILLS_AGENTS="codex opencode gemini-cli github-copilot claude-code hermes-agent"
+
+    assert_not_exists "$HOME/.hermes/skills/old-skill"
+    assert_contains "$OUTPUT_FILE" "Removing stale local link: old-skill from $HOME/.hermes/skills"
+}
+
+test_hermes_opt_in_leaves_hand_authored_real_dirs() {
+    create_skill_dir "agents-md"
+    mkdir -p "$HOME/.hermes/skills/hand-authored"
+    echo "hello" > "$HOME/.hermes/skills/hand-authored/data.txt"
+
+    run_link_with_env SKILLS_AGENTS="codex opencode gemini-cli github-copilot claude-code hermes-agent"
+
+    if [ ! -f "$HOME/.hermes/skills/hand-authored/data.txt" ]; then
+        fail "expected hand-authored real dir in ~/.hermes/skills to survive"
+    fi
+}
+
+test_hermes_opt_in_leaves_foreign_target_symlinks() {
+    create_skill_dir "agents-md"
+    mkdir -p "$HOME/.hermes/skills" "$TEST_ROOT/external/foreign-skill"
+    ln -s "$TEST_ROOT/external/foreign-skill" "$HOME/.hermes/skills/foreign-skill"
+
+    run_link_with_env SKILLS_AGENTS="codex opencode gemini-cli github-copilot claude-code hermes-agent"
+
+    assert_symlink_target "$HOME/.hermes/skills/foreign-skill" "$TEST_ROOT/external/foreign-skill"
+}
+
 run_test "removes stale local symlinks" test_removes_stale_local_symlinks
 run_test "empty skills dir cleans without bogus links" test_empty_skills_dir_cleans_without_creating_bogus_links
+run_test "default does not create ~/.hermes/skills target" test_default_does_not_create_hermes_target
+run_test "hermes opt-in links local skills into ~/.hermes/skills" test_hermes_opt_in_links_local_skills_into_hermes_dir
+run_test "hermes opt-in removes stale local symlink from ~/.hermes/skills" test_hermes_opt_in_removes_stale_local_symlink_from_hermes
+run_test "hermes opt-in leaves hand-authored real dirs" test_hermes_opt_in_leaves_hand_authored_real_dirs
+run_test "hermes opt-in leaves foreign-target symlinks" test_hermes_opt_in_leaves_foreign_target_symlinks
 
 echo "PASSED: $TESTS_RUN test(s)"

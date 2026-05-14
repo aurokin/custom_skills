@@ -4,10 +4,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILLS_BIN="${SKILLS_BIN:-skills}"
-SKILLS_AGENTS="${SKILLS_AGENTS:-codex opencode gemini-cli github-copilot claude-code}"
 SKILLS_AUDIT_REPO_COVERAGE="${SKILLS_AUDIT_REPO_COVERAGE:-1}"
 UPSTREAM_COVERAGE_FILE="${UPSTREAM_COVERAGE_FILE:-$SCRIPT_DIR/upstream-coverage.json}"
 
+# shellcheck source=lib/agents.sh
+source "$SCRIPT_DIR/lib/agents.sh"
 # shellcheck source=lib/catalog.sh
 source "$SCRIPT_DIR/lib/catalog.sh"
 # shellcheck source=lib/upstream-audit.sh
@@ -143,11 +144,14 @@ main() {
     require_cmd jq
 
     local skills_agents=()
-    IFS=' ' read -r -a skills_agents <<< "$SKILLS_AGENTS"
+    compute_skills_agents skills_agents
     if [ "${#skills_agents[@]}" -eq 0 ]; then
         echo "No SKILLS_AGENTS configured" >&2
         exit 1
     fi
+
+    local non_hermes_skills_agents=()
+    agents_excluding_hermes skills_agents non_hermes_skills_agents
 
     # Source of truth: desired global skill specs.
     # Keep this list fully explicit so stale-skill removal can compare exact
@@ -212,29 +216,62 @@ main() {
     # --- Phase 1: Remove stale skills ---
     echo ""
     echo "Checking for stale skills..."
-    local removed=0
-    for name in "${!installed_names[@]}"; do
-        if [[ -z "${desired_names[$name]:-}" ]]; then
-            echo "  Removing: $name"
-            "$SKILLS_BIN" remove -g "$name" -y || true
-            removed=$((removed + 1))
-        fi
-    done
-    if [ "$removed" -eq 0 ]; then
-        echo "  No stale skills to remove."
+    if [ "${#non_hermes_skills_agents[@]}" -eq 0 ]; then
+        echo "  Skipping stale-skill removal (Hermes-only mode; Hermes installs are add-only)."
     else
-        echo "  Removed $removed skill(s)."
+        local removed=0
+        for name in "${!installed_names[@]}"; do
+            if [[ -z "${desired_names[$name]:-}" ]]; then
+                echo "  Removing: $name"
+                "$SKILLS_BIN" remove -g "$name" -a "${non_hermes_skills_agents[@]}" -y || true
+                removed=$((removed + 1))
+            fi
+        done
+        if [ "$removed" -eq 0 ]; then
+            echo "  No stale skills to remove."
+        else
+            echo "  Removed $removed skill(s)."
+        fi
     fi
 
-    # Clean up broken symlinks in skills directories
-    local skills_target
+    # Clean up broken symlinks in owned skills directories regardless of mode:
+    # these dirs are always ours and the cleanup has zero Hermes interaction.
+    local skills_target link
     for skills_target in "$HOME/.agents/skills" "$HOME/.claude/skills"; do
         if [ -d "$skills_target" ]; then
-            while IFS= read -r link; do
+            while IFS= read -r -d '' link; do
                 echo "  Cleaned broken symlink: $(basename "$link") (in $skills_target)"
-            done < <(find "$skills_target" -maxdepth 1 -type l ! -exec test -e {} \; -print -delete 2>/dev/null)
+                rm -f "$link"
+            done < <(find "$skills_target" -maxdepth 1 -type l ! -exec test -e {} \; -print0 2>/dev/null)
         fi
     done
+
+    # Hermes is append-only: only remove broken symlinks that resolve into
+    # paths we own. Real directories and foreign-target symlinks are left
+    # untouched so Hermes can manage its own skill collection.
+    #
+    # readlink target prefixes we recognize as ours:
+    #   $SCRIPT_DIR/skills/      — local repo skills linked by link-skills.sh
+    #                              (absolute path)
+    #   $HOME/.agents/skills/    — canonical install path for multi-agent
+    #                              installs by the skills CLI (absolute form)
+    #   ../../.agents/skills/    — same canonical install path in the relative
+    #                              form the skills CLI typically emits
+    if agents_include_hermes skills_agents; then
+        local hermes_skills_dir="$HOME/.hermes/skills"
+        if [ -d "$hermes_skills_dir" ]; then
+            local link_dest
+            while IFS= read -r -d '' link; do
+                link_dest="$(readlink "$link" 2>/dev/null || true)"
+                case "$link_dest" in
+                    "$SCRIPT_DIR/skills/"*|"$HOME/.agents/skills/"*|"../../.agents/skills/"*)
+                        echo "  Cleaned broken symlink: $(basename "$link") (in $hermes_skills_dir)"
+                        rm -f "$link"
+                        ;;
+                esac
+            done < <(find "$hermes_skills_dir" -maxdepth 1 -type l ! -exec test -e {} \; -print0 2>/dev/null)
+        fi
+    fi
 
     # --- Phase 2: Update existing skills ---
     echo ""
