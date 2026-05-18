@@ -626,6 +626,101 @@ EOF
     assert_log_not_contains "remove|"
 }
 
+test_preserved_global_skill_name_is_not_removed() {
+    local local_config_file="$TEST_ROOT/.skills.local.json"
+    cat > "$local_config_file" <<'EOF'
+{
+  "preserveGlobalSkillNames": [
+    "handmade-playbook"
+  ]
+}
+EOF
+
+    seed_state_with_all_specs
+    printf '%s\n' "handmade-playbook" >> "$STATE_FILE"
+
+    run_sync_with_env LOCAL_SKILLS_CONFIG_FILE="$local_config_file"
+
+    assert_contains "$OUTPUT_FILE" "Preserving manual skill: handmade-playbook"
+    assert_log_not_contains "remove|handmade-playbook"
+    assert_contains "$STATE_FILE" "handmade-playbook"
+}
+
+test_preserved_missing_global_skill_name_is_not_added() {
+    local local_config_file="$TEST_ROOT/.skills.local.json"
+    cat > "$local_config_file" <<'EOF'
+{
+  "preserveGlobalSkillNames": [
+    "handmade-playbook"
+  ]
+}
+EOF
+
+    seed_state_with_all_specs
+
+    run_sync_with_env LOCAL_SKILLS_CONFIG_FILE="$local_config_file"
+
+    assert_not_contains "$OUTPUT_FILE" "Preserving manual skill: handmade-playbook"
+    assert_log_not_contains "add|"
+    assert_log_not_contains "remove|handmade-playbook"
+    assert_not_contains "$STATE_FILE" "handmade-playbook"
+}
+
+test_preserve_global_skill_names_schema_fails_fast() {
+    local local_config_file="$TEST_ROOT/.skills.local.json"
+    cat > "$local_config_file" <<'EOF'
+{
+  "preserveGlobalSkillNames": {}
+}
+EOF
+
+    if run_sync_with_env LOCAL_SKILLS_CONFIG_FILE="$local_config_file"; then
+        fail "expected install script to reject invalid preserveGlobalSkillNames schema"
+    fi
+
+    assert_contains "$OUTPUT_FILE" "Invalid local skills config in $local_config_file"
+    assert_log_not_contains "add|"
+    assert_log_not_contains "remove|"
+}
+
+test_preserve_global_skill_names_entry_validation_fails_fast() {
+    local local_config_file="$TEST_ROOT/.skills.local.json"
+    cat > "$local_config_file" <<'EOF'
+{
+  "preserveGlobalSkillNames": [
+    "owner/repo@not-a-name"
+  ]
+}
+EOF
+
+    if run_sync_with_env LOCAL_SKILLS_CONFIG_FILE="$local_config_file"; then
+        fail "expected install script to reject invalid preserveGlobalSkillNames entry"
+    fi
+
+    assert_contains "$OUTPUT_FILE" "Invalid skill name in $local_config_file:preserveGlobalSkillNames[0]: owner/repo@not-a-name"
+    assert_log_not_contains "add|"
+    assert_log_not_contains "remove|"
+}
+
+test_preserve_global_skill_names_entries_must_be_strings() {
+    local local_config_file="$TEST_ROOT/.skills.local.json"
+    cat > "$local_config_file" <<'EOF'
+{
+  "preserveGlobalSkillNames": [
+    123
+  ]
+}
+EOF
+
+    if run_sync_with_env LOCAL_SKILLS_CONFIG_FILE="$local_config_file"; then
+        fail "expected install script to reject non-string preserveGlobalSkillNames entry"
+    fi
+
+    assert_contains "$OUTPUT_FILE" "Invalid local skills config in $local_config_file"
+    assert_log_not_contains "add|"
+    assert_log_not_contains "remove|"
+}
+
 test_repo_wide_global_include_supports_targeted_explicit_exclude() {
     local local_config_file="$TEST_ROOT/.skills.local.json"
     local wide_specs_file="$TEST_ROOT/wide-global-specs.txt"
@@ -1122,6 +1217,11 @@ run_test "invalid global spec fails fast" test_invalid_global_spec_fails_fast
 run_test "repo-wide global spec expands to all skills" test_repo_wide_global_spec_expands_to_all_skills
 run_test "local global specs are preserved" test_local_global_specs_are_preserved
 run_test "invalid excludeGlobalSpecs schema fails fast" test_invalid_exclude_global_specs_schema_fails_fast
+run_test "preserved global skill name is not removed" test_preserved_global_skill_name_is_not_removed
+run_test "preserved missing global skill name is not added" test_preserved_missing_global_skill_name_is_not_added
+run_test "preserveGlobalSkillNames schema fails fast" test_preserve_global_skill_names_schema_fails_fast
+run_test "preserveGlobalSkillNames entry validation fails fast" test_preserve_global_skill_names_entry_validation_fails_fast
+run_test "preserveGlobalSkillNames entries must be strings" test_preserve_global_skill_names_entries_must_be_strings
 run_test "repo-wide global include supports targeted explicit exclude" test_repo_wide_global_include_supports_targeted_explicit_exclude
 run_test "repo-wide global exclusion removes entire repo" test_repo_wide_global_exclusion_removes_entire_repo
 run_test "repo-wide global exclusion over explicit specs skips enumeration" test_repo_wide_global_exclusion_over_explicit_specs_skips_enumeration

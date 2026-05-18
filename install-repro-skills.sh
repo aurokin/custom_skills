@@ -171,10 +171,14 @@ main() {
     local desired_specs=()
     filter_excluded_specs expanded_specs resolved_excluded_specs desired_specs
 
+    local preserved_global_skill_names=()
+    load_preserved_global_skill_names preserved_global_skill_names || return 1
+
     echo "Syncing global skills for agents: ${skills_agents[*]}"
 
     # Build set of exact expected skill names from the curated specs.
     local -A desired_names=()
+    local -A preserved_names=()
     local -A declared_by_repo=()
     append_specs_to_repo_skill_map desired_specs declared_by_repo
     for spec in "${desired_specs[@]}"; do
@@ -183,6 +187,9 @@ main() {
         repo="$(spec_repo "$spec")"
         name="$(spec_skill "$spec")"
         desired_names["${spec##*@}"]=1
+    done
+    for name in "${preserved_global_skill_names[@]}"; do
+        preserved_names["$name"]=1
     done
 
     local -a coverage_repos=()
@@ -221,6 +228,10 @@ main() {
     else
         local removed=0
         for name in "${!installed_names[@]}"; do
+            if [[ -n "${preserved_names[$name]:-}" ]]; then
+                echo "  Preserving manual skill: $name"
+                continue
+            fi
             if [[ -z "${desired_names[$name]:-}" ]]; then
                 echo "  Removing: $name"
                 "$SKILLS_BIN" remove -g "$name" -a "${non_hermes_skills_agents[@]}" -y || true

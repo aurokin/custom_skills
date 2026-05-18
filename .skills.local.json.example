@@ -6,6 +6,9 @@
     "owner/repo@skill-to-exclude",
     "owner/another-repo"
   ],
+  "preserveGlobalSkillNames": [
+    "my-handmade-global-skill"
+  ],
   "familySpecs": {
     "expo": [
       "owner/repo@my-expo-skill"

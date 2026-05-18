@@ -31,6 +31,17 @@ validate_explicit_spec_line() {
     fi
 }
 
+validate_skill_name() {
+    local skill_name="$1"
+    local file="$2"
+    local field_name="$3"
+
+    if [[ -z "$skill_name" || "$skill_name" =~ [[:space:]/@] ]]; then
+        echo "Invalid skill name in $file:$field_name: $skill_name" >&2
+        return 1
+    fi
+}
+
 validate_family_name() {
     local family_name="$1"
     local file="$2"
@@ -183,6 +194,8 @@ ensure_local_skills_config_valid() {
         type == "object" and
         ((.globalSpecs // []) | type == "array") and
         ((.excludeGlobalSpecs // []) | type == "array") and
+        ((.preserveGlobalSkillNames // []) | type == "array") and
+        all((.preserveGlobalSkillNames // [])[]?; type == "string") and
         ((.familySpecs // {}) | type == "object") and
         ((.excludeFamilySpecs // {}) | type == "object") and
         ((.customFamilies // {}) | type == "object") and
@@ -214,6 +227,15 @@ ensure_local_skills_config_valid() {
         (.excludeGlobalSpecs // [])
         | to_entries[]
         | "excludeGlobalSpecs[\(.key)]\t\(.value)"
+    ' "$config_file")
+
+    while IFS=$'\t' read -r field_name spec; do
+        [ -z "$field_name" ] && continue
+        validate_skill_name "$spec" "$config_file" "$field_name" || return 2
+    done < <(jq -r '
+        (.preserveGlobalSkillNames // [])
+        | to_entries[]
+        | "preserveGlobalSkillNames[\(.key)]\t\(.value)"
     ' "$config_file")
 
     while IFS= read -r family_name; do
@@ -335,6 +357,32 @@ load_local_global_exclude_specs() {
         [ -z "$spec" ] && continue
         target_ref+=("$spec")
     done < <(jq -r '.excludeGlobalSpecs[]?' "$LOCAL_SKILLS_CONFIG_FILE")
+
+    dedupe_array "$target_name"
+}
+
+load_preserved_global_skill_names() {
+    local target_name="$1"
+    local -n target_ref="$target_name"
+    local status=0
+    local skill_name
+
+    target_ref=()
+
+    if ensure_local_skills_config_valid; then
+        status=0
+    else
+        status=$?
+        if [ "$status" -eq 1 ]; then
+            return 0
+        fi
+        return 1
+    fi
+
+    while IFS= read -r skill_name; do
+        [ -z "$skill_name" ] && continue
+        target_ref+=("$skill_name")
+    done < <(jq -r '.preserveGlobalSkillNames[]?' "$LOCAL_SKILLS_CONFIG_FILE")
 
     dedupe_array "$target_name"
 }

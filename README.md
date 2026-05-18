@@ -36,7 +36,9 @@ Use it when you want to update your personal baseline skill environment.
 If `.skills.local.json` exists, its `globalSpecs` are merged into the desired
 global set and its `excludeGlobalSpecs` remove explicit upstream skills, or
 whole upstream repos after normalization, from that resolved global set before
-stale-skill removal runs.
+stale-skill removal runs. Its `preserveGlobalSkillNames` protects named
+handmade global skills from stale removal without adding them to the resolved
+managed install set.
 
 Exclusion-override behavior, resolved repo summaries, and the `^` full-coverage
 marker are documented in [docs/exclude-overrides.md](docs/exclude-overrides.md).
@@ -211,6 +213,8 @@ Supported keys:
   additive upstream specs merged into `install-repro-skills.sh`
 - `excludeGlobalSpecs`
   upstream specs removed from the resolved global install set
+- `preserveGlobalSkillNames`
+  handmade global skill names protected from stale removal
 - `familySpecs`
   additive specs keyed by existing curated family name
 - `excludeFamilySpecs`
@@ -232,6 +236,9 @@ Example:
   "excludeGlobalSpecs": [
     "owner/repo@skill-to-exclude",
     "owner/another-repo"
+  ],
+  "preserveGlobalSkillNames": [
+    "my-handmade-global-skill"
   ],
   "familySpecs": {
     "expo": [
@@ -257,6 +264,7 @@ Example:
 Rules:
 
 - `excludeGlobalSpecs` accepts repo-wide `owner/repo` and explicit `owner/repo@skill-name` entries
+- `preserveGlobalSkillNames` accepts exact skill names only, not upstream specs
 - `excludeFamilySpecs` only accepts explicit `owner/repo@skill-name` entries
 - `familySpecs` can only target existing curated families
 - `excludeFamilySpecs` can only target existing curated families

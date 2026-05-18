@@ -9,6 +9,10 @@ from upstream-managed curated skills as well as add to them.
 Use this when the curated catalog is almost right, but you want to remove
 specific upstream skills or whole upstream repos from your personal overlay.
 
+For handmade global skills that should survive sync but are not upstream specs,
+use `preserveGlobalSkillNames` instead. Preservation only protects existing
+skill names from stale removal; it does not install or audit them.
+
 ## Glossary
 
 - Include: a spec contributed by curated config or additive local config.
@@ -26,6 +30,9 @@ Add these optional keys to `.skills.local.json`:
   exclusions applied to the merged global set used by
   `install-repro-skills.sh`; accepts repo-wide `owner/repo` and explicit
   `owner/repo@skill-name` entries
+- `preserveGlobalSkillNames`
+  exact global skill names protected from stale removal by
+  `install-repro-skills.sh`; accepts names only, not upstream specs
 - `excludeFamilySpecs`
   exclusions keyed by curated family name, applied only to that family's merged
   set during `deploy-project-skills.sh`; accepts explicit
@@ -79,11 +86,15 @@ out of the final resolved set even if it was also added locally.
   `familySpecs`.
 - Exclusions do not remove local repo-managed skills from `skills/`.
 - `excludeFamilySpecs` only targets curated families, not `customFamilies`.
+- `preserveGlobalSkillNames` only affects global stale removal and is intended
+  for already-installed handmade skills.
 
 ## Validation Boundaries
 
 - `.skills.local.json` must remain a JSON object.
 - `excludeGlobalSpecs` must be an array of valid skill specs.
+- `preserveGlobalSkillNames` must be an array of non-empty strings with no
+  whitespace, `/`, or `@`.
 - `excludeFamilySpecs` must be an object keyed by curated family name, and each
   value must be an array of explicit skill specs.
 - `familySpecs` can only target curated families that exist in the catalog.
