@@ -202,6 +202,7 @@ The source of truth is split by purpose:
 Current project families:
 - `expo`
 - `convex`
+- `mattpocock-teaching`
 
 ### Notable catalog changes
 

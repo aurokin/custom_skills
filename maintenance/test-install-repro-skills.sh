@@ -157,6 +157,7 @@ seed_default_mock_repos() {
     local raindrop_root="$MOCK_REPOS/dedene/raindrop-cli"
     local matt_root="$MOCK_REPOS/mattpocock/skills"
     local humanizer_root="$MOCK_REPOS/blader/humanizer"
+    local cursor_thermos_root="$MOCK_REPOS/cursor/plugins/thermos"
 
     mkdir -p \
         "$agent_browser_root" \
@@ -169,7 +170,8 @@ seed_default_mock_repos() {
         "$vercel_skills_root" \
         "$raindrop_root" \
         "$matt_root" \
-        "$humanizer_root"
+        "$humanizer_root" \
+        "$cursor_thermos_root"
 
     create_mock_skill_file "$impeccable_root" "impeccable"
     create_mock_skill_file "$anthropics_skills_root" "webapp-testing"
@@ -200,6 +202,9 @@ seed_default_mock_repos() {
     create_mock_skill_file "$raindrop_root" "raindrop-cli"
     create_mock_skill_file "$matt_root" "grill-me"
     create_mock_skill_file "$humanizer_root" "humanizer"
+    create_mock_skill_file "$cursor_thermos_root" "thermo-nuclear-code-quality-review"
+    create_mock_skill_file "$cursor_thermos_root" "thermo-nuclear-review"
+    create_mock_skill_file "$cursor_thermos_root" "thermos"
 }
 
 write_fake_skills_cli() {

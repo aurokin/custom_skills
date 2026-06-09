@@ -46,22 +46,35 @@ load_coverage_manifest_into_maps() {
 
 collect_upstream_skill_names() {
     local repo="$1"
-    local tmp_dir repo_dir skill_file skill_name frontmatter_name
+    local tmp_dir repo_dir search_dir clone_repo repo_subdir skill_file skill_name frontmatter_name
     local skill_file_count=0
     local has_root_skill=0
 
+    clone_repo="$(github_clone_repo "$repo")"
+    repo_subdir="$(github_repo_subdir "$repo")"
+
     tmp_dir="$(mktemp -d)"
     repo_dir="$tmp_dir/repo"
+    search_dir="$repo_dir"
 
-    if ! git clone --depth 1 "https://github.com/${repo}.git" "$repo_dir" >/dev/null 2>&1; then
+    if ! git clone --depth 1 "https://github.com/${clone_repo}.git" "$repo_dir" >/dev/null 2>&1; then
         rm -rf "$tmp_dir"
         return 1
+    fi
+
+    if [ -n "$repo_subdir" ]; then
+        search_dir="$repo_dir/$repo_subdir"
+        if [ ! -d "$search_dir" ]; then
+            audit_warn "Skill subdirectory not found in $repo: $repo_subdir"
+            rm -rf "$tmp_dir"
+            return 1
+        fi
     fi
 
     # The skills CLI treats a root SKILL.md as the canonical single-skill
     # layout (see `skills add --full-depth`). When present, it is the only
     # skill the CLI installs by default, so we mirror that here.
-    if [ -f "$repo_dir/SKILL.md" ]; then
+    if [ -f "$search_dir/SKILL.md" ]; then
         has_root_skill=1
     fi
 
@@ -69,12 +82,12 @@ collect_upstream_skill_names() {
     # cover both `skills/<name>/SKILL.md` and agent-scoped layouts like
     # `.claude/skills/<name>/SKILL.md` (used by dedene/raindrop-cli).
     while IFS= read -r -d '' skill_file; do
-        if [ "$has_root_skill" -eq 1 ] && [ "$skill_file" != "$repo_dir/SKILL.md" ]; then
+        if [ "$has_root_skill" -eq 1 ] && [ "$skill_file" != "$search_dir/SKILL.md" ]; then
             continue
         fi
         skill_file_count=$((skill_file_count + 1))
         skill_name="$(basename "$(dirname "$skill_file")")"
-        if [ "$skill_file" = "$repo_dir/SKILL.md" ]; then
+        if [ "$skill_file" = "$search_dir/SKILL.md" ]; then
             skill_name="$(basename "$repo")"
         fi
         frontmatter_name="$(extract_skill_frontmatter_name "$skill_file")"
@@ -82,7 +95,7 @@ collect_upstream_skill_names() {
             skill_name="$frontmatter_name"
         fi
         printf '%s\n' "$skill_name"
-    done < <(find "$repo_dir" -type d -name .git -prune -o -type f -name SKILL.md -print0 2>/dev/null)
+    done < <(find "$search_dir" -type d -name .git -prune -o -type f -name SKILL.md -print0 2>/dev/null)
 
     if [ "$skill_file_count" -eq 0 ]; then
         audit_warn "No SKILL.md files found in $repo; repo layout may have changed"
@@ -91,6 +104,22 @@ collect_upstream_skill_names() {
     fi
 
     rm -rf "$tmp_dir"
+}
+
+github_clone_repo() {
+    local repo="$1"
+    local owner name rest
+
+    IFS='/' read -r owner name rest <<< "$repo"
+    printf '%s/%s\n' "$owner" "$name"
+}
+
+github_repo_subdir() {
+    local repo="$1"
+    local owner name rest
+
+    IFS='/' read -r owner name rest <<< "$repo"
+    printf '%s\n' "$rest"
 }
 
 extract_skill_frontmatter_name() {

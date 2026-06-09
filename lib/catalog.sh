@@ -13,6 +13,8 @@ validate_spec_line() {
     local file="$2"
     local line_number="$3"
 
+    # The repo portion may include a GitHub subdirectory after owner/name, such
+    # as cursor/plugins/thermos@thermos.
     if [[ ! "$spec" =~ ^[^[:space:]@]+/[^[:space:]@]+(@[^[:space:]@]+)?$ ]]; then
         echo "Invalid skill spec in $file:$line_number: $spec" >&2
         return 1

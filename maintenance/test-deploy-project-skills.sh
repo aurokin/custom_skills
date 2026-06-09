@@ -169,9 +169,10 @@ EOF
 seed_default_mock_repos() {
     local expo_root="$MOCK_REPOS/expo/skills"
     local convex_root="$MOCK_REPOS/waynesutton/convexskills"
+    local mattpocock_root="$MOCK_REPOS/mattpocock/skills"
     local mobile_root="$MOCK_REPOS/acme/mobile-skills"
 
-    mkdir -p "$expo_root" "$convex_root" "$mobile_root"
+    mkdir -p "$expo_root" "$convex_root" "$mattpocock_root" "$mobile_root"
 
     create_mock_skill_file "$expo_root" "building-native-ui"
     create_mock_skill_file "$expo_root" "expo-api-routes"
@@ -197,6 +198,9 @@ seed_default_mock_repos() {
     create_mock_skill_file "$convex_root" "convex-schema-validator"
     create_mock_skill_file "$convex_root" "convex-security-audit"
     create_mock_skill_file "$convex_root" "convex-security-check"
+
+    create_mock_skill_file "$mattpocock_root" "teach"
+    create_mock_skill_file "$mattpocock_root" "scaffold-exercises"
 
     create_mock_skill_file "$mobile_root" "expo-internals"
     create_mock_skill_file "$mobile_root" "release-ops"
@@ -278,6 +282,7 @@ setup_test_env() {
     export FAKE_GIT_LOG_FILE="$GIT_LOG_FILE"
     export FAKE_GIT_ROOT="$MOCK_REPOS"
     export FAKE_GIT_FAIL_REPOS=""
+    export LOCAL_SKILLS_CONFIG_FILE="$TEST_ROOT/absent.skills.local.json"
 
     mkdir -p \
         "$TEST_ROOT/bin" \
@@ -326,6 +331,7 @@ test_list_families() {
 
     assert_contains "$OUTPUT_FILE" $'expo\tExpo and React Native workflow skills'
     assert_contains "$OUTPUT_FILE" $'convex\tConvex platform and data layer skills'
+    assert_contains "$OUTPUT_FILE" $'mattpocock-teaching\tMatt Pocock teaching and exercise-authoring skills'
 }
 
 test_list_families_skips_missing_spec_files() {
@@ -598,9 +604,10 @@ test_all_families_deploy() {
             --yes
     ) > "$OUTPUT_FILE" 2>&1
 
-    assert_contains "$OUTPUT_FILE" "Families: expo convex"
+    assert_contains "$OUTPUT_FILE" "Families: expo convex mattpocock-teaching"
     assert_log_contains "add|expo/skills|"
     assert_log_contains "add|waynesutton/convexskills|"
+    assert_log_contains "add|mattpocock/skills|agents=codex opencode gemini-cli github-copilot claude-code|skills=teach scaffold-exercises|copy=1|yes=1"
 }
 
 test_repo_wide_family_spec_installs_all_skills() {

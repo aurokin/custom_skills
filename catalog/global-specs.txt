@@ -16,3 +16,6 @@ vercel-labs/skills@find-skills
 blader/humanizer@humanizer
 dedene/raindrop-cli@raindrop-cli
 mattpocock/skills@grill-me
+cursor/plugins/thermos@thermo-nuclear-code-quality-review
+cursor/plugins/thermos@thermo-nuclear-review
+cursor/plugins/thermos@thermos
