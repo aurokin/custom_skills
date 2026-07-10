@@ -7,6 +7,14 @@ This repo has two distinct workflows:
 1. Global normalization for your personal always-on setup
 2. Project deployment for repo-specific skill families like Expo and Convex
 
+> **In progress:** a TypeScript CLI (`skm`, under [`cli/`](cli/)) is replacing
+> the bash engine, adding agent-scoped skills, private overlay repos, and
+> Terraform-style plan/apply with an ownership state file. Design:
+> [docs/skills-manager-design.md](docs/skills-manager-design.md) · decisions:
+> [docs/adr/](docs/adr/) · usage: [cli/README.md](cli/README.md). The bash
+> scripts below remain authoritative for upstream-skill sync until the
+> migration completes.
+
 It also supports an optional gitignored personal overlay file for extra global
 skills, per-family additions, and custom project families.
 
