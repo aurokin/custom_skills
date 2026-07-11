@@ -15,6 +15,7 @@ design and the research behind these).
 | [0007](0007-agent-definitions-artifact-type.md) | Agent definitions become a second artifact type; custom_agents absorbed | accepted |
 | [0008](0008-tprompt-export.md) | tprompt export as a generic prompt-export channel for agents and skills | accepted |
 | [0009](0009-dialect-document-emitter-rendering.md) | Rendering is dialect → document AST → emitter; byte quirks live only in emitters | accepted |
+| [0010](0010-composed-skills-artifact-type.md) | Composed skills: per-consumer rendered skills with a build matrix and posture | accepted |
 
 Convention: new ADRs take the next number, one decision per file, statuses
 `proposed → accepted → superseded by NNNN`.
