@@ -212,6 +212,22 @@ describe("validation matrix", () => {
   });
 });
 
+describe("consumer files", () => {
+  test("a consumer file not naming a declared consumer is rejected", () => {
+    const input = baseInput();
+    input.consumerFiles = { ...input.consumerFiles, cdoex: "<!-- @section gate -->\nx\n" };
+    expect(() => loadComposedSkill(input)).toThrow(
+      /consumer file 'consumers\/cdoex\.md' does not match any declared consumer/,
+    );
+  });
+
+  test("a consumer file for a declared consumer passes", () => {
+    const input = baseInput();
+    input.consumerFiles = { ...input.consumerFiles, codex: "<!-- @section gate -->\nx\n" };
+    expect(() => loadComposedSkill(input)).not.toThrow();
+  });
+});
+
 describe("self-derivation guards", () => {
   test("droid (ownDir factory) with no matching provider requires selfProvider: none", () => {
     // factory is not among providers {claude,codex,grok} → the acknowledgment is
@@ -318,6 +334,32 @@ describe("posture-marker grammar", () => {
 
   test("a marker not at line start is treated as plain text", () => {
     const text = "prefix <!-- @posture chaos --> still text\n";
+    expect(() => validatePostureMarkers(text, "t", false)).not.toThrow();
+  });
+
+  test("markers inside a tilde fence are ignored", () => {
+    const text = ["~~~", "<!-- @posture chaos -->", "~~~", "tail"].join("\n");
+    expect(() => validatePostureMarkers(text, "t", false)).not.toThrow();
+  });
+
+  test("markers inside an indented (three-space) fence are ignored", () => {
+    const text = ["   ```", "<!-- @posture chaos -->", "   ```", "tail"].join("\n");
+    expect(() => validatePostureMarkers(text, "t", false)).not.toThrow();
+  });
+
+  test("a longer backtick fence is only closed by a run at least as long", () => {
+    const text = [
+      "````md",
+      "```", // shorter run inside a ```` fence — content, not a closer
+      "<!-- @posture chaos -->",
+      "````",
+      "tail",
+    ].join("\n");
+    expect(() => validatePostureMarkers(text, "t", false)).not.toThrow();
+  });
+
+  test("a mismatched fence char does not close the block", () => {
+    const text = ["```", "~~~", "<!-- @posture chaos -->", "```", "tail"].join("\n");
     expect(() => validatePostureMarkers(text, "t", false)).not.toThrow();
   });
 });

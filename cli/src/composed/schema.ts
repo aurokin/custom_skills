@@ -112,6 +112,13 @@ export function loadComposedSkill(input: ComposedSkillInput): {
   for (const [id, provider] of Object.entries(providers)) {
     validatePostureMarkers(provider.body, `${name}/providers/${id}.md`, false);
   }
+  for (const id of Object.keys(input.consumerFiles).sort()) {
+    if (!(id in consumers)) {
+      throw new ComposedSkillError(
+        `consumer file 'consumers/${id}.md' does not match any declared consumer (${path})`,
+      );
+    }
+  }
   for (const [id, text] of Object.entries(input.consumerFiles)) {
     validatePostureMarkers(text, `${name}/consumers/${id}.md`, true);
   }
@@ -383,7 +390,32 @@ function unusedProviderWarnings(
 const POSTURE_RE = /^<!--\s*@posture\s+(.+?)\s*-->\s*$/;
 const END_RE = /^<!--\s*@end\s*-->\s*$/;
 const SECTION_RE = /^<!--\s*@section\s+(.+?)\s*-->\s*$/;
-const FENCE_RE = /^```/;
+
+type FenceState = { char: string; len: number } | null;
+
+/**
+ * CommonMark-style fence tracking for one line: ``` and ~~~ fences, up to three
+ * leading spaces, runs longer than three, and closers that must match the opener
+ * char with at least its length and carry nothing but whitespace. Returns the new
+ * state and whether this line is itself a fence delimiter.
+ */
+function stepFence(fence: FenceState, line: string): { fence: FenceState; isDelimiter: boolean } {
+  const m = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+  if (!m) return { fence, isDelimiter: false };
+  const run = m[1]!;
+  const char = run[0]!;
+  const rest = m[2] ?? "";
+  if (fence === null) {
+    // A backtick opener's info string may not contain backticks (CommonMark);
+    // such a line is inline code, not a fence.
+    if (char === "`" && rest.includes("`")) return { fence, isDelimiter: false };
+    return { fence: { char, len: run.length }, isDelimiter: true };
+  }
+  if (char === fence.char && run.length >= fence.len && rest.trim() === "") {
+    return { fence: null, isDelimiter: true };
+  }
+  return { fence, isDelimiter: false };
+}
 
 /**
  * Validate posture-marker grammar in one source file. Markers are recognized only
@@ -393,16 +425,14 @@ const FENCE_RE = /^```/;
  */
 export function validatePostureMarkers(text: string, label: string, trackSections: boolean): void {
   const lines = text.split("\n");
-  let inFence = false;
+  let fence: FenceState = null;
   let openPosture: string | null = null;
   let openLine = 0;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i] ?? "";
-    if (FENCE_RE.test(line)) {
-      inFence = !inFence;
-      continue;
-    }
-    if (inFence) continue;
+    const step = stepFence(fence, line);
+    fence = step.fence;
+    if (step.isDelimiter || fence !== null) continue;
 
     const pm = POSTURE_RE.exec(line);
     if (pm) {
@@ -452,15 +482,13 @@ export function validatePostureMarkers(text: string, label: string, trackSection
 export function splitConsumerSections(text: string): ComposedConsumerFile {
   const lines = text.split("\n");
   const buffers: Record<string, string[]> = {};
-  let inFence = false;
+  let fence: FenceState = null;
   let current: string | null = null;
   for (const line of lines) {
-    if (FENCE_RE.test(line)) {
-      inFence = !inFence;
-      if (current) buffers[current]!.push(line);
-      continue;
-    }
-    const sm = !inFence ? SECTION_RE.exec(line) : null;
+    const step = stepFence(fence, line);
+    const isContent = !step.isDelimiter && fence === null;
+    fence = step.fence;
+    const sm = isContent ? SECTION_RE.exec(line) : null;
     if (sm) {
       const section = sm[1] ?? "";
       current = section;
