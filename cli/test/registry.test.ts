@@ -76,6 +76,84 @@ describe("loadRegistry + validateRegistry", () => {
   });
 });
 
+describe("agent-definition field validation", () => {
+  test("the real registry's agentDef fields validate", () => {
+    const reg = realRegistry();
+    expect(reg.agents["claude-code"]!.agentDefDir).toBe("~/.claude/agents");
+    expect(reg.agents.codex!.agentDefDialect).toBe("codex");
+    expect(reg.agents.pi!.agentDefSupport).toBe("none");
+    expect(reg.agents.grok!.agentDefSupport).toBe("unknown");
+  });
+
+  test("a supported agentDef requires agentDefDir", () => {
+    const reg = baseRegistry();
+    reg.agents.alpha!.agentDefSupport = "supported";
+    reg.agents.alpha!.agentDefDialect = "claude";
+    reg.agents.alpha!.agentDefEvidence = "test";
+    expect(() => validateRegistry(reg)).toThrow(/requires agentDefDir/);
+  });
+
+  test("a supported agentDef requires agentDefDialect", () => {
+    const reg = baseRegistry();
+    reg.agents.alpha!.agentDefDir = "~/.alpha/agents";
+    reg.agents.alpha!.agentDefEvidence = "test";
+    expect(() => validateRegistry(reg)).toThrow(/requires agentDefDialect/);
+  });
+
+  test("a declared dir/dialect requires evidence", () => {
+    const reg = baseRegistry();
+    reg.agents.alpha!.agentDefDir = "~/.alpha/agents";
+    reg.agents.alpha!.agentDefDialect = "claude";
+    expect(() => validateRegistry(reg)).toThrow(/require agentDefEvidence/);
+  });
+
+  test("none support must not declare a dir", () => {
+    const reg = baseRegistry();
+    reg.agents.alpha!.agentDefSupport = "none";
+    reg.agents.alpha!.agentDefDir = "~/.alpha/agents";
+    reg.agents.alpha!.agentDefEvidence = "test";
+    expect(() => validateRegistry(reg)).toThrow(/must not declare agentDefDir/);
+  });
+
+  test("rejects an invalid dialect", () => {
+    const reg = baseRegistry();
+    reg.agents.alpha!.agentDefDir = "~/.alpha/agents";
+    reg.agents.alpha!.agentDefDialect = "toml" as never;
+    reg.agents.alpha!.agentDefEvidence = "test";
+    expect(() => validateRegistry(reg)).toThrow(/invalid agentDefDialect/);
+  });
+
+  test("rejects a non-string or empty agentDefDir", () => {
+    const reg = baseRegistry();
+    reg.agents.alpha!.agentDefDir = 42 as never;
+    reg.agents.alpha!.agentDefDialect = "claude";
+    reg.agents.alpha!.agentDefEvidence = "test";
+    expect(() => validateRegistry(reg)).toThrow(/agentDefDir must be a non-empty string/);
+    reg.agents.alpha!.agentDefDir = "  ";
+    expect(() => validateRegistry(reg)).toThrow(/agentDefDir must be a non-empty string/);
+  });
+
+  test("rejects a non-string or empty agentDefEvidence", () => {
+    const reg = baseRegistry();
+    reg.agents.alpha!.agentDefDir = "~/.alpha/agents";
+    reg.agents.alpha!.agentDefDialect = "claude";
+    reg.agents.alpha!.agentDefEvidence = true as never;
+    expect(() => validateRegistry(reg)).toThrow(/require agentDefEvidence/);
+    reg.agents.alpha!.agentDefEvidence = "";
+    expect(() => validateRegistry(reg)).toThrow(/require agentDefEvidence/);
+  });
+
+  test("an agent with no agentDef fields is fine", () => {
+    expect(() => validateRegistry(baseRegistry())).not.toThrow();
+  });
+
+  test("rejects a stray agentDefEvidence with no support/dir/dialect", () => {
+    const reg = baseRegistry();
+    reg.agents.alpha!.agentDefEvidence = "orphan citation";
+    expect(() => validateRegistry(reg)).toThrow(/requires agentDefDir/);
+  });
+});
+
 describe("readersOf", () => {
   const reg = realRegistry();
 
