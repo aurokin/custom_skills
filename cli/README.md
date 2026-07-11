@@ -20,6 +20,14 @@ In scope:
   `registry/agents.json` (`allow` = exactly-these; `deny` = hard guarantee).
 - **First-party rendering** for claude-code / codex / github-copilot
   (`agents/*.yaml` frontmatter deep-merged into a real dir copy).
+- **Composed skills** from `composed/<name>/` of any root: one source
+  (`skill.yaml` + `SKILL.tmpl.md` + `providers/*.md` + `consumers/*.md`)
+  rendered into a per-consumer skill tree — routing table with ordinal
+  fallback chains, registry-derived self-exclusion, compile-time posture
+  (`sandboxed`/`yolo`), only-referenced provider references. Placement hash
+  is the full rendered-tree hash; hand-edited trees are detected by
+  `status`/`doctor` and repaired by remove-then-re-apply
+  ([ADR 0010](../docs/adr/0010-composed-skills-artifact-type.md)).
 - **Ownership state** + `plan`/`apply` (Terraform-style), drift `status`,
   `doctor`, `explain`.
 

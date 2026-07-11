@@ -4,14 +4,17 @@ This repo manages a curated set of agent skills (for Claude Code, Codex, OpenCod
 1. **Upstream skills** installed globally from GitHub repos using the `skills` CLI
 2. **Local skills** in `skills/` symlinked into `~/.agents/skills` and `~/.claude/skills`
 3. **Agent definitions** in `agents/` (one `agent.yaml` + `instructions.md` per subagent), rendered per-harness by `skm` into each agent's definitions dir (`~/.claude/agents/*.md`, `~/.codex/agents/*.toml`, `~/.copilot/agents/*.agent.md`, `~/.cursor/agents/*.md`, `~/.gemini/agents/*.md`, `~/.config/opencode/agent/*.md`)
+4. **Composed skills** in `composed/<name>/` of any root (`skill.yaml` + `SKILL.tmpl.md` + `providers/*.md` + `consumers/*.md`), rendered by `skm` into one skill tree per declared consumer (routing table, self-exclusion, compile-time posture, only-referenced provider references). See ADR 0010; the shipped example is `orchestrate` in the private overlay root.
 
 A TypeScript CLI (`skm`, under `cli/`, run with `bun`) is replacing the bash
 engine per `docs/skills-manager-design.md` and the ADRs in `docs/adr/`. It
 adds agent-scoped skills (registry-driven placement, `registry/agents.json`),
-private overlay repos, plan/apply with an ownership state file, and per-agent
-frontmatter rendering. Until migration phase 6 completes, the bash scripts
+private overlay repos, plan/apply with an ownership state file, per-agent
+frontmatter rendering, and composed skills (per-consumer rendered skill
+trees, ADR 0010). Until migration phase 6 completes, the bash scripts
 remain authoritative for upstream-skill sync; `skm` owns local-skill
-placement, scoping, and drift detection. See `cli/README.md`.
+placement, scoping, composed-skill rendering, and drift detection. See
+`cli/README.md`.
 
 ## Key Commands
 
@@ -82,6 +85,14 @@ Create `skills/<name>/SKILL.md` with frontmatter and prompt content, then run ei
 
 Create `agents/<name>/agent.yaml` + `agents/<name>/instructions.md`, then run
 `skm plan` / `skm apply` (from `cli/`, via `bun`).
+
+## Adding a New Composed Skill
+
+Create `composed/<name>/` (in this repo or an overlay root) with `skill.yaml`
+(posture, consumers with descriptions, dimensions), `SKILL.tmpl.md`,
+`providers/*.md`, and `consumers/*.md` per ADR 0010, then run `skm plan` /
+`skm apply`. Applying edits requires re-apply; hand-edited deployed trees are
+repaired by remove-then-re-apply.
 
 ## Adding a New Upstream Skill
 
