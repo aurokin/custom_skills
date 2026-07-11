@@ -25,7 +25,11 @@
       "dialect": "claude",
       "symlinks": "followed",
       "firstParty": true,
-      "evidence": "Source: upstream/claude-code src/skills/loadSkillsDir.ts (clone 2026-04, stale); docs code.claude.com/docs/en/skills. Does NOT read ~/.agents/skills."
+      "evidence": "Source: upstream/claude-code src/skills/loadSkillsDir.ts (clone 2026-04, stale); docs code.claude.com/docs/en/skills. Does NOT read ~/.agents/skills.",
+      "agentDefSupport": "supported",
+      "agentDefDir": "~/.claude/agents",
+      "agentDefDialect": "claude",
+      "agentDefEvidence": "Source: upstream/claude-code src/tools/AgentTool/loadAgentsDir.ts:296-393,541-755 + src/utils/markdownConfigLoader.ts:297-372 (userDir = getClaudeConfigHomeDir()/agents, honors CLAUDE_CONFIG_DIR); docs code.claude.com/docs/en/sub-agents. Markdown + YAML frontmatter, body = system prompt; name+description required. Clone 2026-04 stale."
     },
     "codex": {
       "skillsSupport": "supported",
@@ -35,7 +39,11 @@
       "dialect": "codex",
       "symlinks": "followed",
       "firstParty": true,
-      "evidence": "Source: upstream/codex codex-rs/core-skills/src/loader.rs (clone 2026-07-09): ~/.agents/skills primary user root; $CODEX_HOME/skills deprecated; /etc/codex/skills admin; agents/openai.yaml descriptor."
+      "evidence": "Source: upstream/codex codex-rs/core-skills/src/loader.rs (clone 2026-07-09): ~/.agents/skills primary user root; $CODEX_HOME/skills deprecated; /etc/codex/skills admin; agents/openai.yaml descriptor.",
+      "agentDefSupport": "supported",
+      "agentDefDir": "~/.codex/agents",
+      "agentDefDialect": "codex",
+      "agentDefEvidence": "Source: upstream/codex codex-rs/core/src/config/agent_roles.rs:74-97,474-549,236-316 (config_folder/agents, recursive *.toml agent roles; RawAgentRoleFileToml name/description/nickname_candidates/developer_instructions); docs learn.chatgpt.com/docs/agent-configuration/subagents. TOML, one agent per file. Also one-time migration reads ~/.claude/agents/*.md -> ~/.codex/agents/*.toml (external_agent_config.rs EXTERNAL_AGENT_DIR='.claude')."
     },
     "github-copilot": {
       "skillsSupport": "supported",
@@ -45,7 +53,11 @@
       "dialect": "copilot",
       "symlinks": "unknown",
       "firstParty": true,
-      "evidence": "Docs: docs.github.com copilot-cli add-skills — ~/.copilot/skills and ~/.agents/skills; honors name, description, license, allowed-tools."
+      "evidence": "Docs: docs.github.com copilot-cli add-skills — ~/.copilot/skills and ~/.agents/skills; honors name, description, license, allowed-tools.",
+      "agentDefSupport": "supported",
+      "agentDefDir": "~/.copilot/agents",
+      "agentDefDialect": "copilot",
+      "agentDefEvidence": "Docs: docs.github.com copilot-cli create-custom-agents-for-cli (~/.copilot/agents personal path, .agent.md; home dir wins over repo on name clash) + reference/custom-agents-configuration (required name+description; optional target/tools/model/disable-model-invocation/user-invocable/mcp-servers/metadata). Markdown + YAML frontmatter."
     },
     "gemini-cli": {
       "skillsSupport": "supported",
@@ -54,7 +66,11 @@
       "ownDir": "gemini",
       "dialect": "spec",
       "symlinks": "followed",
-      "evidence": "Source: upstream/gemini-cli packages/core/src/skills/skillManager.ts (clone 2026-05): ~/.gemini/skills then ~/.agents/skills, last-writer-wins; parses name+description only."
+      "evidence": "Source: upstream/gemini-cli packages/core/src/skills/skillManager.ts (clone 2026-05): ~/.gemini/skills then ~/.agents/skills, last-writer-wins; parses name+description only.",
+      "agentDefSupport": "supported",
+      "agentDefDir": "~/.gemini/agents",
+      "agentDefDialect": "gemini",
+      "agentDefEvidence": "Source: upstream/gemini-cli packages/core/src/config/storage.ts:117-119 (getUserAgentsDir = globalGeminiDir/agents) + packages/core/src/agents/agentLoader.ts:50-119 (localAgentSchema; body = system_prompt) + registry.ts:234-236; docs geminicli.com/docs/core/subagents. Markdown + YAML frontmatter (kind/name/description/display_name/tools/mcp_servers/model/temperature/max_turns/timeout_mins); name+description required. Clone 2026-05."
     },
     "opencode": {
       "skillsSupport": "supported",
@@ -64,7 +80,11 @@
       "dialect": "spec",
       "symlinks": "followed",
       "killSwitches": ["OPENCODE_DISABLE_CLAUDE_CODE_SKILLS", "OPENCODE_DISABLE_EXTERNAL_SKILLS"],
-      "evidence": "Source: upstream/opencode packages/opencode/src/skill/index.ts (clone 2026-07-09): scans ~/.claude/skills, ~/.agents/skills, opencode config dirs; duplicate names last-write-wins."
+      "evidence": "Source: upstream/opencode packages/opencode/src/skill/index.ts (clone 2026-07-09): scans ~/.claude/skills, ~/.agents/skills, opencode config dirs; duplicate names last-write-wins.",
+      "agentDefSupport": "supported",
+      "agentDefDir": "~/.config/opencode/agent",
+      "agentDefDialect": "opencode",
+      "agentDefEvidence": "Source: upstream/opencode packages/core/src/config/plugin/agent.ts:19-23,31-44,80-159 (globs {agent,agents}/**/*.md; agentKeys model/variant/request/system/description/mode/hidden/color/steps/disabled/permissions; name derived from path) + global.ts:13,64 (config = xdgConfig/opencode, OPENCODE_CONFIG_DIR override); docs opencode.ai/docs/agents. Markdown + YAML frontmatter. Dir casing agent/ (singular) per opencode.ai; loader also accepts plural agents/."
     },
     "pi": {
       "skillsSupport": "supported",
@@ -73,7 +93,9 @@
       "ownDir": "pi",
       "dialect": "spec",
       "symlinks": "followed",
-      "evidence": "Source: upstream/pi-mono packages/coding-agent/src/core/skills.ts (clone 2026-05): ~/.pi/agent/skills + ~/.agents/skills; honors disable-model-invocation; does NOT scan ~/.claude/skills."
+      "evidence": "Source: upstream/pi-mono packages/coding-agent/src/core/skills.ts (clone 2026-05): ~/.pi/agent/skills + ~/.agents/skills; honors disable-model-invocation; does NOT scan ~/.claude/skills.",
+      "agentDefSupport": "none",
+      "agentDefEvidence": "Source: upstream/pi-mono packages/coding-agent (clone 2026-05): core CLI ships no user-global agent-definition directory (no discoverAgents/agents-dir loader under src). The only such loader is an opt-in example extension examples/extensions/subagent/agents.ts:88,97-115 (reads ~/.pi/agents/*.md), not the shipped CLI."
     },
     "cursor": {
       "skillsSupport": "supported",
@@ -82,7 +104,11 @@
       "ownDir": "cursor",
       "dialect": "spec",
       "symlinks": "unknown",
-      "evidence": "Docs: cursor.com/docs/skills — reads ~/.agents/skills, ~/.cursor/skills, plus ~/.claude/skills and ~/.codex/skills for compatibility; honors paths, disable-model-invocation, metadata. Note: ~/.cursor/skills-cursor observed on-machine; discrepancy tracked in design doc open items."
+      "evidence": "Docs: cursor.com/docs/skills — reads ~/.agents/skills, ~/.cursor/skills, plus ~/.claude/skills and ~/.codex/skills for compatibility; honors paths, disable-model-invocation, metadata. Note: ~/.cursor/skills-cursor observed on-machine; discrepancy tracked in design doc open items.",
+      "agentDefSupport": "supported",
+      "agentDefDir": "~/.cursor/agents",
+      "agentDefDialect": "cursor",
+      "agentDefEvidence": "Docs: cursor.com/docs/subagents — ~/.cursor/agents + .cursor/agents; Markdown + YAML frontmatter (name defaults to filename, description, model default 'inherit', readonly, is_background); invoke via /name; project wins on conflict. Also reads .claude/agents and .codex/agents for compatibility (cross-harness read, docs-confirmed)."
     },
     "grok": {
       "skillsSupport": "supported",
@@ -91,7 +117,9 @@
       "ownDir": "grok",
       "dialect": "spec",
       "symlinks": "unknown",
-      "evidence": "Docs: docs.x.ai skills-plugins-marketplaces — ~/.grok/skills + config [skills] paths; Claude-compat and ~/.agents support ambiguous, treated as maybe-reads for deny guarantees."
+      "evidence": "Docs: docs.x.ai skills-plugins-marketplaces — ~/.grok/skills + config [skills] paths; Claude-compat and ~/.agents support ambiguous, treated as maybe-reads for deny guarantees.",
+      "agentDefSupport": "unknown",
+      "agentDefEvidence": "No source or documentation evidence gathered in the AUR-614 passes that grok reads a user-global agent-definition directory. Unknown; do not assume support."
     },
     "droid": {
       "skillsSupport": "supported",
@@ -100,7 +128,9 @@
       "ownDir": "factory",
       "dialect": "spec",
       "symlinks": "unknown",
-      "evidence": "~/.agents/skills read user-verified on-machine 2026-07-10 (Factory docs lag; they list only ~/.factory/skills globally). Honors user-invocable, disable-model-invocation; project dirs .factory/skills and .agent/skills (singular)."
+      "evidence": "~/.agents/skills read user-verified on-machine 2026-07-10 (Factory docs lag; they list only ~/.factory/skills globally). Honors user-invocable, disable-model-invocation; project dirs .factory/skills and .agent/skills (singular).",
+      "agentDefSupport": "unknown",
+      "agentDefEvidence": "No agent-definition-directory evidence gathered in the AUR-614 source/docs passes for Factory/droid. Unknown; do not assume support."
     },
     "antigravity": {
       "skillsSupport": "supported",
@@ -109,7 +139,9 @@
       "ownDir": "antigravity",
       "dialect": "spec",
       "symlinks": "unknown",
-      "evidence": "Docs: antigravity.google/docs/skills — ~/.gemini/config/skills read by all variants; the CLI variant additionally reads ~/.gemini/skills (hence maybe-read of gemini's own dir); no evidence of home-level ~/.agents read."
+      "evidence": "Docs: antigravity.google/docs/skills — ~/.gemini/config/skills read by all variants; the CLI variant additionally reads ~/.gemini/skills (hence maybe-read of gemini's own dir); no evidence of home-level ~/.agents read.",
+      "agentDefSupport": "unknown",
+      "agentDefEvidence": "No agent-definition-directory evidence gathered in the AUR-614 passes for antigravity. Unknown; do not assume support."
     },
     "hermes": {
       "skillsSupport": "supported",
@@ -119,7 +151,9 @@
       "dialect": "spec",
       "symlinks": "followed",
       "addOnly": true,
-      "evidence": "Source: upstream/hermes-agent tools/skills_tool.py (clone 2026-05): ~/.hermes/skills + config skills.external_dirs; first-seen name wins. Add-only policy per this repo's Hermes rules."
+      "evidence": "Source: upstream/hermes-agent tools/skills_tool.py (clone 2026-05): ~/.hermes/skills + config skills.external_dirs; first-seen name wins. Add-only policy per this repo's Hermes rules.",
+      "agentDefSupport": "none",
+      "agentDefEvidence": "Source: upstream/hermes-agent tools/delegate_tool.py (clone 2026-05): subagents are config-key driven (delegation.* in config.yaml, dynamic spawn, max_spawn_depth); no ~/.hermes/agents/*.md|*.yaml loader (no agents-directory glob/listdir in *.py). ~/.hermes used only for logs/state."
     },
     "aider": {
       "skillsSupport": "none",
@@ -127,7 +161,9 @@
       "maybeReads": [],
       "dialect": "spec",
       "symlinks": "unknown",
-      "evidence": "Source: upstream/aider (clone 2026-05): no skill loading code exists."
+      "evidence": "Source: upstream/aider (clone 2026-05): no skill loading code exists.",
+      "agentDefSupport": "unknown",
+      "agentDefEvidence": "Not investigated for agent-definition directories in the AUR-614 passes. Unknown; do not assume support."
     }
   }
 }

@@ -14,6 +14,11 @@ export type SymlinkSupport = "followed" | "unknown";
 /** Frontmatter dialect an agent parses. First-party dialects can be rendered. */
 export type Dialect = "claude" | "codex" | "copilot" | "spec";
 
+/** Whether an agent reads a user-global agent-definition (subagent) directory. */
+export type AgentDefSupport = "supported" | "none" | "unknown";
+/** File format/flavor of an agent-definition directory (per-harness field sets differ). */
+export type AgentDefDialect = "claude" | "codex" | "copilot" | "cursor" | "opencode" | "gemini";
+
 /** A global skill directory the registry knows about (keyed by dir id). */
 export interface Directory {
   /** May contain a leading `~`; resolve with dirPath()/expandTilde(). */
@@ -41,6 +46,16 @@ export interface AgentCapability {
   /** Placements are add-only; never pruned, never overwritten (hermes). */
   addOnly?: boolean;
   evidence: string;
+  // ── Agent-definition (subagent) directory support (AUR-614, phase 2). ──
+  // Parse/validate only; not yet wired into placement (phase 3, AUR-616).
+  /** Whether this agent reads a user-global agent-definition directory. */
+  agentDefSupport?: AgentDefSupport;
+  /** User-global agent-definition dir (may contain a leading `~`). Present iff supported. */
+  agentDefDir?: string;
+  /** File format/flavor of that directory. Present iff supported. */
+  agentDefDialect?: AgentDefDialect;
+  /** Evidence citation for the agent-definition support decision. */
+  agentDefEvidence?: string;
 }
 
 export interface Registry {

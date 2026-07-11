@@ -4,7 +4,7 @@
 import * as fs from "node:fs";
 import { RegistryError } from "./errors";
 import { type SkmEnv, expandTilde } from "./env";
-import type { MachineConfig, Registry } from "./types";
+import type { AgentCapability, MachineConfig, Registry } from "./types";
 
 /** Parse + validate a registry file. */
 export function loadRegistry(filePath: string): Registry {
@@ -48,6 +48,53 @@ export function validateRegistry(reg: Registry): void {
     if (agent.skillsSupport === "supported" && agent.ownDir === undefined) {
       throw new RegistryError(`supported agent '${agentId}' has no ownDir`);
     }
+    validateAgentDef(agentId, agent);
+  }
+}
+
+const AGENT_DEF_SUPPORT_VALUES = new Set(["supported", "none", "unknown"]);
+const AGENT_DEF_DIALECT_VALUES = new Set(["claude", "codex", "copilot", "cursor", "opencode", "gemini"]);
+
+/**
+ * Validate the optional agent-definition (subagent) directory fields on one agent:
+ * - a declared dir/dialect implies support and requires the matching companions;
+ * - `none`/`unknown` support must not declare a dir or dialect;
+ * - any agentDef field requires an evidence citation.
+ */
+function validateAgentDef(agentId: string, agent: AgentCapability): void {
+  const support = agent.agentDefSupport;
+  const hasDir = agent.agentDefDir !== undefined;
+  const hasDialect = agent.agentDefDialect !== undefined;
+  const hasEvidence = agent.agentDefEvidence !== undefined;
+  const anyField = support !== undefined || hasDir || hasDialect || hasEvidence;
+  if (!anyField) return;
+
+  if (support !== undefined && !AGENT_DEF_SUPPORT_VALUES.has(support)) {
+    throw new RegistryError(`agent '${agentId}' has invalid agentDefSupport '${support}'`);
+  }
+  if (hasDialect && !AGENT_DEF_DIALECT_VALUES.has(agent.agentDefDialect as string)) {
+    throw new RegistryError(`agent '${agentId}' has invalid agentDefDialect '${agent.agentDefDialect}'`);
+  }
+  if (hasDir && (typeof agent.agentDefDir !== "string" || agent.agentDefDir.trim() === "")) {
+    throw new RegistryError(`agent '${agentId}' agentDefDir must be a non-empty string`);
+  }
+  if (support === "none" || support === "unknown") {
+    if (hasDir || hasDialect) {
+      throw new RegistryError(
+        `agent '${agentId}' agentDefSupport '${support}' must not declare agentDefDir or agentDefDialect`,
+      );
+    }
+  } else {
+    // supported (explicit or implied by a declared dir/dialect)
+    if (!hasDir) {
+      throw new RegistryError(`agent '${agentId}' agent-definition support requires agentDefDir`);
+    }
+    if (!hasDialect) {
+      throw new RegistryError(`agent '${agentId}' agent-definition support requires agentDefDialect`);
+    }
+  }
+  if (typeof agent.agentDefEvidence !== "string" || agent.agentDefEvidence.trim() === "") {
+    throw new RegistryError(`agent '${agentId}' agentDef fields require agentDefEvidence`);
   }
 }
 
