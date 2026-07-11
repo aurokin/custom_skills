@@ -279,6 +279,8 @@ export interface DesiredComposedSkill {
   name: string;
   source: SkillSource;
   posture: Posture;
+  /** SKILL.tmpl.md body (raw, posture markers unfiltered); the render entry point. */
+  template: string;
   /** Declared consumers keyed by agent id. */
   consumers: Record<string, ComposedConsumer>;
   /** Ordered routing dimensions. */

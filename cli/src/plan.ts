@@ -11,7 +11,7 @@ import { loadContext } from "./context";
 import { type SkmEnv, expandTilde } from "./env";
 import { computeDesiredPlacements, dialectForDir } from "./placements";
 import { privacyViolation } from "./privacy";
-import { hashContent, renderedHash } from "./render";
+import { hashContent, renderedHash, treeHashOf } from "./render";
 import { classifyTarget, scanEntry } from "./scan";
 import { findOwner } from "./state";
 import { resolveTpromptCollisions } from "./tprompt/channel";
@@ -110,6 +110,10 @@ export function buildPlan(
     if (p.channel === "tprompt") {
       // Foreign stem collision → reported above, skip this placement only.
       if (!tpromptSkip.has(path.resolve(p.path))) diffTpromptFile(env, dp, state, actions, warnings, foreign);
+    } else if (p.artifactType === "composed-skill") {
+      // MUST precede the `rendered` branch: a composed placement's hash is the full
+      // tree hash, so diffRendered's SKILL.md-sha compare would false-positive.
+      diffComposed(env, dp, state, actions, warnings, foreign);
     } else if (p.artifactType === "agent-def") {
       diffAgentDefFile(env, dp, state, actions, warnings, foreign);
     } else if (p.kind === "rendered") {
@@ -335,6 +339,63 @@ function diffRendered(
   if (owner && entry.kind === "symlink") {
     // Unlinking a link loses no content → repair by re-rendering.
     actions.push(baseAction(dp, "create", rendered));
+  } else {
+    foreign.push({ drift: "foreign", skill: dp.skill, path: p.path, detail: describeForeign(env, p.path) });
+  }
+}
+
+/**
+ * Diff one composed-skill rendered tree (ADR 0010). The placement `hash` already IS
+ * the expected in-memory full-tree hash (set at placement time); disk state is the
+ * on-disk `treeHashOf`. Mirrors diffRendered but keyed on the tree hash: absent →
+ * create; owned + disk matches recorded tree + matches expected → noop; owned + disk
+ * matches recorded but expected differs (source edit) → update; owned + disk diverged
+ * from the recorded tree (hand-edit) → warn + NO action (remedy: remove-then-re-apply,
+ * because a composed placement is doctor-non-fixable); unowned + disk matches expected
+ * → adopt; anything else → foreign.
+ */
+function diffComposed(
+  env: SkmEnv,
+  dp: DesiredPlacement,
+  state: StateFile,
+  actions: PlannedAction[],
+  warnings: Warning[],
+  foreign: DriftFinding[],
+): void {
+  const p = dp.placement;
+  const expectedHash = p.hash!; // the full rendered-tree hash, computed at placement time
+  const owner = findOwner(state, p.path);
+  const entry = scanEntry(env, p.path);
+
+  if (entry.kind === "absent") {
+    actions.push(baseAction(dp, "create", p));
+    return;
+  }
+  if (entry.kind === "dir") {
+    const diskTree = treeHashOf(p.path);
+    if (owner) {
+      const recordedTree = owner.placement.tree;
+      if (recordedTree && diskTree === recordedTree) {
+        actions.push(baseAction(dp, recordedTree === expectedHash ? "noop" : "update", p));
+      } else {
+        // Disk diverged from skm's recorded render → hand-edited. Composed placements
+        // are non-fixable, so the remedy is remove-then-re-apply (plain apply won't).
+        warnings.push({
+          kind: "modified",
+          skill: dp.skill,
+          message: `composed skill '${dp.skill}' at ${p.path} was hand-edited; not overwritten (remove it and re-apply to restore skm's render)`,
+        });
+      }
+    } else if (diskTree === expectedHash) {
+      actions.push(baseAction(dp, "adopt", p));
+    } else {
+      foreign.push({ drift: "foreign", skill: dp.skill, path: p.path, detail: "unmanaged directory" });
+    }
+    return;
+  }
+  // A symlink/file sits where a composed rendered dir belongs.
+  if (owner && entry.kind === "symlink") {
+    actions.push(baseAction(dp, "create", p)); // unlinking a link loses nothing → re-render
   } else {
     foreign.push({ drift: "foreign", skill: dp.skill, path: p.path, detail: describeForeign(env, p.path) });
   }
