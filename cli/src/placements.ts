@@ -126,7 +126,7 @@ export function computeDesiredPlacements(
   // Composed skills (ADR 0010): one rendered tree per declared consumer, fanned out
   // to that consumer's ownDir, bypassing the read-graph solver.
   for (const composed of desired.composedSkills) {
-    appendComposedSkills(env, registry, composed, placements, bleed);
+    appendComposedSkills(env, registry, enabled, composed, placements, bleed);
   }
 
   // tprompt export channel (ADR 0008): one owned rendered-file prompt per eligible
@@ -235,11 +235,16 @@ function appendAgentDefFiles(
 function appendComposedSkills(
   env: SkmEnv,
   registry: Registry,
+  enabled: string[],
   composed: DesiredComposedSkill,
   placements: DesiredPlacement[],
   bleed: BleedEntry[],
 ): void {
   for (const consumer of Object.keys(composed.consumers).sort()) {
+    // Declared consumers are intersected with the machine's enabled agents, like
+    // every other placement type — a machine configured without claude-code must
+    // not receive claude-code's composed tree.
+    if (!enabled.includes(consumer)) continue;
     const ownDir = registry.agents[consumer]?.ownDir;
     if (!ownDir) continue; // load-time guards ensure supported consumers have an ownDir
     const dir = registry.directories[ownDir];

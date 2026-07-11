@@ -95,8 +95,14 @@ export function diagnose(
       // false-positive. Composed trees are NOT --fix repairable (applyFixes skips
       // them); a hand-edit is remedied by remove-then-re-apply → fixable: false.
       if (artifact.type === "composed-skill") {
-        if (sp.kind === "rendered" && entry.kind === "dir" && treeHashOf(expandTilde(env, sp.path)) !== sp.tree) {
-          findings.push({ category: "reconcile", severity: "warn", skill, path: sp.path, message: "composed skill hand-edited (tree hash mismatch)", fixable: false });
+        if (sp.kind === "rendered") {
+          if (entry.kind === "absent") {
+            findings.push({ category: "broken-link", severity: "error", skill, path: sp.path, message: "owned composed tree missing", fixable: false });
+          } else if (entry.kind !== "dir") {
+            findings.push({ category: "broken-link", severity: "error", skill, path: sp.path, message: `owned composed tree replaced by ${entry.kind}`, fixable: false });
+          } else if (treeHashOf(expandTilde(env, sp.path)) !== sp.tree) {
+            findings.push({ category: "reconcile", severity: "warn", skill, path: sp.path, message: "composed skill hand-edited (tree hash mismatch)", fixable: false });
+          }
         }
         continue;
       }

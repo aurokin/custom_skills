@@ -257,6 +257,25 @@ describe("plan/apply — composed fan-out", () => {
     const plan = buildPlan(sandbox!.env, ctx.config, ctx.registry, ctx.desired, ctx.state);
     expect(plan.actions.every((a) => a.type === "noop")).toBe(true);
   });
+
+  test("declared consumers are intersected with the machine's enabled agents", async () => {
+    sandbox = makeSandbox();
+    const root = makeRoot(sandbox, "root", "public");
+    makeComposed(root.path, "orchestrate", composedOpts());
+    // Machine enables codex only — claude-code is declared by the skill but must
+    // not receive a placement, like every other placement type.
+    writeMachineConfig(sandbox, { version: 1, roots: [root], agents: ["codex"] });
+
+    const ctx = loadContext(sandbox!.env);
+    const solved = computeDesiredPlacements(sandbox!.env, ctx.config, ctx.registry, ctx.desired);
+    const composedPlacements = solved.placements.filter((dp) => dp.placement.artifactType === "composed-skill");
+    expect(composedPlacements.map((dp) => dp.placement.agent)).toEqual(["codex"]);
+
+    const outcome = await runApply(sandbox!.env, opts());
+    expect(outcome.exitCode).toBe(0);
+    expect(fs.existsSync(codexTree())).toBe(true);
+    expect(fs.existsSync(claudeTree())).toBe(false);
+  });
 });
 
 describe("placement metadata", () => {
@@ -374,6 +393,31 @@ describe("doctor arms", () => {
     const outcome = await runDoctor(sandbox!.env, opts({ fix: true }));
     expect(fs.readFileSync(editedFile, "utf8")).toBe(editedBytes);
     expect(outcome.exitCode).toBe(2);
+  });
+
+  test("a deleted composed tree is reported missing, non-fixable", async () => {
+    setup();
+    await runApply(sandbox!.env, opts());
+    fs.rmSync(claudeTree(), { recursive: true });
+
+    const ctx = loadContext(sandbox!.env);
+    const findings = diagnose(sandbox!.env, ctx.config, ctx.registry, ctx.desired, ctx.state);
+    const finding = findings.find((f) => f.skill === "orchestrate" && f.message.includes("owned composed tree missing"));
+    expect(finding?.category).toBe("broken-link");
+    expect(finding?.fixable).toBe(false);
+  });
+
+  test("a composed tree replaced by a file is reported, non-fixable", async () => {
+    setup();
+    await runApply(sandbox!.env, opts());
+    fs.rmSync(codexTree(), { recursive: true });
+    fs.writeFileSync(codexTree(), "not a tree\n");
+
+    const ctx = loadContext(sandbox!.env);
+    const findings = diagnose(sandbox!.env, ctx.config, ctx.registry, ctx.desired, ctx.state);
+    const finding = findings.find((f) => f.skill === "orchestrate" && f.message.includes("owned composed tree replaced by file"));
+    expect(finding?.category).toBe("broken-link");
+    expect(finding?.fixable).toBe(false);
   });
 
   test("4b: an unmanaged copy of a private composed consumer tree is a private-leak finding", () => {
