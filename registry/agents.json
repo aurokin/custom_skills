@@ -1,0 +1,133 @@
+{
+  "version": 1,
+  "researched": "2026-07-10",
+  "note": "Global-scope agent capability registry. See docs/skills-manager-design.md §4 for the research behind every entry. reads[] is precedence-ordered where the agent defines precedence; maybeReads[] entries are unconfirmed reads treated as reads for deny guarantees.",
+  "directories": {
+    "shared": { "path": "~/.agents/skills" },
+    "claude": { "path": "~/.claude/skills" },
+    "codex": { "path": "~/.codex/skills", "deprecated": true, "note": "Deprecated in codex source; usable but flagged when chosen for scoped placement." },
+    "copilot": { "path": "~/.copilot/skills" },
+    "gemini": { "path": "~/.gemini/skills" },
+    "opencode": { "path": "~/.config/opencode/skills", "note": "Honors XDG_CONFIG_HOME." },
+    "pi": { "path": "~/.pi/agent/skills", "note": "Relocatable via PI_CODING_AGENT_DIR." },
+    "cursor": { "path": "~/.cursor/skills" },
+    "grok": { "path": "~/.grok/skills" },
+    "factory": { "path": "~/.factory/skills" },
+    "antigravity": { "path": "~/.gemini/config/skills", "note": "Variant-inconsistent upstream; this is the dir documented as read by all variants." },
+    "hermes": { "path": "~/.hermes/skills" }
+  },
+  "agents": {
+    "claude-code": {
+      "skillsSupport": "supported",
+      "reads": ["claude"],
+      "maybeReads": [],
+      "ownDir": "claude",
+      "dialect": "claude",
+      "symlinks": "followed",
+      "firstParty": true,
+      "evidence": "Source: upstream/claude-code src/skills/loadSkillsDir.ts (clone 2026-04, stale); docs code.claude.com/docs/en/skills. Does NOT read ~/.agents/skills."
+    },
+    "codex": {
+      "skillsSupport": "supported",
+      "reads": ["shared", "codex"],
+      "maybeReads": [],
+      "ownDir": "codex",
+      "dialect": "codex",
+      "symlinks": "followed",
+      "firstParty": true,
+      "evidence": "Source: upstream/codex codex-rs/core-skills/src/loader.rs (clone 2026-07-09): ~/.agents/skills primary user root; $CODEX_HOME/skills deprecated; /etc/codex/skills admin; agents/openai.yaml descriptor."
+    },
+    "github-copilot": {
+      "skillsSupport": "supported",
+      "reads": ["copilot", "shared"],
+      "maybeReads": [],
+      "ownDir": "copilot",
+      "dialect": "copilot",
+      "symlinks": "unknown",
+      "firstParty": true,
+      "evidence": "Docs: docs.github.com copilot-cli add-skills — ~/.copilot/skills and ~/.agents/skills; honors name, description, license, allowed-tools."
+    },
+    "gemini-cli": {
+      "skillsSupport": "supported",
+      "reads": ["gemini", "shared"],
+      "maybeReads": [],
+      "ownDir": "gemini",
+      "dialect": "spec",
+      "symlinks": "followed",
+      "evidence": "Source: upstream/gemini-cli packages/core/src/skills/skillManager.ts (clone 2026-05): ~/.gemini/skills then ~/.agents/skills, last-writer-wins; parses name+description only."
+    },
+    "opencode": {
+      "skillsSupport": "supported",
+      "reads": ["claude", "shared", "opencode"],
+      "maybeReads": [],
+      "ownDir": "opencode",
+      "dialect": "spec",
+      "symlinks": "followed",
+      "killSwitches": ["OPENCODE_DISABLE_CLAUDE_CODE_SKILLS", "OPENCODE_DISABLE_EXTERNAL_SKILLS"],
+      "evidence": "Source: upstream/opencode packages/opencode/src/skill/index.ts (clone 2026-07-09): scans ~/.claude/skills, ~/.agents/skills, opencode config dirs; duplicate names last-write-wins."
+    },
+    "pi": {
+      "skillsSupport": "supported",
+      "reads": ["pi", "shared"],
+      "maybeReads": [],
+      "ownDir": "pi",
+      "dialect": "spec",
+      "symlinks": "followed",
+      "evidence": "Source: upstream/pi-mono packages/coding-agent/src/core/skills.ts (clone 2026-05): ~/.pi/agent/skills + ~/.agents/skills; honors disable-model-invocation; does NOT scan ~/.claude/skills."
+    },
+    "cursor": {
+      "skillsSupport": "supported",
+      "reads": ["shared", "cursor", "claude", "codex"],
+      "maybeReads": [],
+      "ownDir": "cursor",
+      "dialect": "spec",
+      "symlinks": "unknown",
+      "evidence": "Docs: cursor.com/docs/skills — reads ~/.agents/skills, ~/.cursor/skills, plus ~/.claude/skills and ~/.codex/skills for compatibility; honors paths, disable-model-invocation, metadata. Note: ~/.cursor/skills-cursor observed on-machine; discrepancy tracked in design doc open items."
+    },
+    "grok": {
+      "skillsSupport": "supported",
+      "reads": ["grok"],
+      "maybeReads": ["shared", "claude"],
+      "ownDir": "grok",
+      "dialect": "spec",
+      "symlinks": "unknown",
+      "evidence": "Docs: docs.x.ai skills-plugins-marketplaces — ~/.grok/skills + config [skills] paths; Claude-compat and ~/.agents support ambiguous, treated as maybe-reads for deny guarantees."
+    },
+    "droid": {
+      "skillsSupport": "supported",
+      "reads": ["factory", "shared"],
+      "maybeReads": [],
+      "ownDir": "factory",
+      "dialect": "spec",
+      "symlinks": "unknown",
+      "evidence": "~/.agents/skills read user-verified on-machine 2026-07-10 (Factory docs lag; they list only ~/.factory/skills globally). Honors user-invocable, disable-model-invocation; project dirs .factory/skills and .agent/skills (singular)."
+    },
+    "antigravity": {
+      "skillsSupport": "supported",
+      "reads": ["antigravity"],
+      "maybeReads": ["gemini"],
+      "ownDir": "antigravity",
+      "dialect": "spec",
+      "symlinks": "unknown",
+      "evidence": "Docs: antigravity.google/docs/skills — ~/.gemini/config/skills read by all variants; the CLI variant additionally reads ~/.gemini/skills (hence maybe-read of gemini's own dir); no evidence of home-level ~/.agents read."
+    },
+    "hermes": {
+      "skillsSupport": "supported",
+      "reads": ["hermes"],
+      "maybeReads": [],
+      "ownDir": "hermes",
+      "dialect": "spec",
+      "symlinks": "followed",
+      "addOnly": true,
+      "evidence": "Source: upstream/hermes-agent tools/skills_tool.py (clone 2026-05): ~/.hermes/skills + config skills.external_dirs; first-seen name wins. Add-only policy per this repo's Hermes rules."
+    },
+    "aider": {
+      "skillsSupport": "none",
+      "reads": [],
+      "maybeReads": [],
+      "dialect": "spec",
+      "symlinks": "unknown",
+      "evidence": "Source: upstream/aider (clone 2026-05): no skill loading code exists."
+    }
+  }
+}

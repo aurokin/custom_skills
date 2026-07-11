@@ -4,6 +4,14 @@ This repo manages a curated set of agent skills (for Claude Code, Codex, OpenCod
 1. **Upstream skills** installed globally from GitHub repos using the `skills` CLI
 2. **Local skills** in `skills/` symlinked into `~/.agents/skills` and `~/.claude/skills`
 
+A TypeScript CLI (`skm`, under `cli/`, run with `bun`) is replacing the bash
+engine per `docs/skills-manager-design.md` and the ADRs in `docs/adr/`. It
+adds agent-scoped skills (registry-driven placement, `registry/agents.json`),
+private overlay repos, plan/apply with an ownership state file, and per-agent
+frontmatter rendering. Until migration phase 6 completes, the bash scripts
+remain authoritative for upstream-skill sync; `skm` owns local-skill
+placement, scoping, and drift detection. See `cli/README.md`.
+
 ## Key Commands
 
 ```bash

@@ -1,0 +1,386 @@
+// Domain model for skm. This is the contract every module team codes against.
+// Vocabulary tracks the design doc: placement, bleed, foreign, adopt, prune,
+// scoping (allow/deny), drift class, first-party rendering.
+
+import type { SkmEnv } from "./env";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Agent capability registry (registry/agents.json). The record KEY is the id;
+// entries carry no redundant `id` field.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type SkillsSupport = "supported" | "none" | "unknown";
+export type SymlinkSupport = "followed" | "unknown";
+/** Frontmatter dialect an agent parses. First-party dialects can be rendered. */
+export type Dialect = "claude" | "codex" | "copilot" | "spec";
+
+/** A global skill directory the registry knows about (keyed by dir id). */
+export interface Directory {
+  /** May contain a leading `~`; resolve with dirPath()/expandTilde(). */
+  path: string;
+  /** Deprecated upstream but still usable; flagged when chosen for scoped placement. */
+  deprecated?: boolean;
+  note?: string;
+}
+
+/** One agent's read graph + capabilities (keyed by agent id). */
+export interface AgentCapability {
+  skillsSupport: SkillsSupport;
+  /** Directory ids the agent definitely reads, precedence-ordered where defined. */
+  reads: string[];
+  /** Unconfirmed reads — treated as reads for deny guarantees. */
+  maybeReads: string[];
+  /** Directory id used for scoped placement. Required when skillsSupport === "supported". */
+  ownDir?: string;
+  dialect: Dialect;
+  symlinks: SymlinkSupport;
+  /** claude-code / codex / github-copilot get rendered per-agent frontmatter. */
+  firstParty?: boolean;
+  /** Env vars that suppress bleed (e.g. OPENCODE_DISABLE_CLAUDE_CODE_SKILLS). */
+  killSwitches?: string[];
+  /** Placements are add-only; never pruned, never overwritten (hermes). */
+  addOnly?: boolean;
+  evidence: string;
+}
+
+export interface Registry {
+  version: number;
+  researched?: string;
+  note?: string;
+  directories: Record<string, Directory>;
+  agents: Record<string, AgentCapability>;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Machine config (~/.config/skills-manager/config.json)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type Visibility = "public" | "private";
+
+/** A registered skills root. `path` is absolute after normalization. */
+export interface Root {
+  name: string;
+  path: string;
+  visibility: Visibility;
+}
+
+export interface MachineConfig {
+  version: number;
+  roots: Root[];
+  /** Enabled agent ids. Defaults to supported-minus-hermes when absent. */
+  agents?: string[];
+  /** git origin remotes into whose worktrees private artifacts may be placed. Default []. */
+  privateOriginAllowlist?: string[];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Scoping (catalog/agent-scopes.json for public root; <root>/overlay.json for overlays)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** allow XOR deny per skill. allow = exactly-these; deny = all-enabled-except-these. */
+export interface AgentScope {
+  allow?: string[];
+  deny?: string[];
+}
+
+/** Parsed scoping map — shape shared by the public catalog and overlay manifests. */
+export interface ScopingSource {
+  version: number;
+  /** Overlay name (overlay.json); absent for the public catalog. */
+  name?: string;
+  note?: string;
+  /** Public repo revision an overlay was tested against. */
+  requiresPublic?: string;
+  /** Upstream specs the overlay contributes (out of v1 scope; carried for parity). */
+  upstream?: string[];
+  skills: Record<string, { agents?: AgentScope }>;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Desired state (resolved union of all roots)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface SkillSource {
+  /** Root name from config. */
+  root: string;
+  visibility: Visibility;
+  /** Absolute path to the skill directory (contains SKILL.md). */
+  path: string;
+}
+
+/** Per-agent frontmatter override files discovered under <skill>/agents/. */
+export interface AgentOverrides {
+  /** agents/claude.yaml — merged into claude-dir placements. */
+  claude?: string;
+  /** agents/copilot.yaml — merged into copilot-dir placements. */
+  copilot?: string;
+  /** agents/codex.yaml — merged into codex-dir placements (optional). */
+  codex?: string;
+  /** agents/openai.yaml — codex descriptor, shipped as-is, never merged. */
+  openai?: string;
+}
+
+export interface DesiredSkill {
+  name: string;
+  source: SkillSource;
+  /** Resolved scoping; undefined means unscoped (shared path). */
+  scoping?: AgentScope;
+  overrides: AgentOverrides;
+}
+
+export interface DesiredState {
+  skills: DesiredSkill[];
+  /** Collision / deprecation / bleed notices surfaced in plan/status. */
+  warnings: Warning[];
+  /** Stable hash of the desired set; apply --plan refuses if it changed. */
+  hash: string;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Placement
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type PlacementKind = "symlink" | "rendered";
+/** An agent id, or the "shared" sentinel for ~/.agents/skills. */
+export type PlacementTarget = string;
+
+export interface Placement {
+  agent: PlacementTarget;
+  /** Directory id (or "shared"). */
+  dir: string;
+  /** Absolute target path. */
+  path: string;
+  kind: PlacementKind;
+  /** sha256 of rendered SKILL.md (rendered placements only). */
+  hash?: string;
+  /** Incidental readers of this dir beyond the intended agent(s). */
+  bleed?: string[];
+  /** Chosen dir is registry-flagged deprecated (e.g. codex dir); plan warns. */
+  deprecated?: boolean;
+  /** Add-only target (hermes): apply never prunes or overwrites it. */
+  addOnly?: boolean;
+}
+
+/** Output of the read-graph solver for one scoped skill. */
+export interface SolvedPlacement {
+  skill: string;
+  placements: Placement[];
+  /** Allowed agents for which no usable dir exists (reported, not an error). */
+  unreachable: string[];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Plan
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type ActionType =
+  | "create" // new placement to materialize (symlink or rendered — see placement.kind)
+  | "adopt" // pre-existing correct artifact → record into state, no fs change
+  | "update" // rendered artifact re-rendered (source changed)
+  | "prune" // owned placement no longer desired → delete (requires --prune)
+  | "noop"; // desired placement already present and owned
+
+export interface PlannedAction {
+  type: ActionType;
+  skill: string;
+  placement: Placement;
+  /** Skill source (root/visibility/path) — carried so apply --plan can materialize. */
+  source?: SkillSource;
+  /** Per-agent frontmatter overrides — carried for rendered create/update/adopt. */
+  overrides?: AgentOverrides;
+  reason?: string;
+}
+
+export type WarningKind =
+  | "collision"
+  | "missing-dir"
+  | "deprecated-dir"
+  | "bleed"
+  | "unscoped-shared"
+  | "frontmatter"
+  | "modified";
+
+export interface Warning {
+  kind: WarningKind;
+  skill?: string;
+  message: string;
+}
+
+/** An allowed agent for which the solver found no usable directory. */
+export interface UnreachableEntry {
+  skill: string;
+  agent: string;
+  reason?: string;
+}
+
+/** Incidental readers of a placement's directory beyond the intended agent(s). */
+export interface BleedEntry {
+  skill: string;
+  path: string;
+  agent: string;
+  readers: string[];
+}
+
+export interface Plan {
+  version: number;
+  machine: string;
+  createdAt: string;
+  /** Hash of the desired state this plan was computed from. */
+  desiredStateHash: string;
+  /** Stable hash of the plan's actions (apply --plan integrity check). */
+  planHash: string;
+  actions: PlannedAction[];
+  warnings: Warning[];
+  /** Allowed agents with no usable dir (reported, not an error). */
+  unreachable: UnreachableEntry[];
+  /** Incidental visibility per placement. */
+  bleed: BleedEntry[];
+  /** Unmanaged content at a desired target → skipped, never touched. */
+  foreign: DriftFinding[];
+  /** Private artifacts refused (disallowed git worktree). */
+  unsafe: DriftFinding[];
+  /** True when any prune action is present (apply needs --prune to execute them). */
+  requiresPrune: boolean;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Ownership state (~/.local/state/skills-manager/state.json)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface StatePlacement {
+  /** Agent id or "shared". */
+  agent: PlacementTarget;
+  path: string;
+  kind: PlacementKind;
+  /** sha256 of the rendered SKILL.md (rendered placements; used for `modified` detection). */
+  hash?: string;
+  /**
+   * sha256 over the FULL rendered artifact tree (rendered placements only, state
+   * schema v2+). Deletion safety compares this to the on-disk tree so a user file
+   * added inside the rendered dir blocks recursive deletion (finding 2). Absent on
+   * artifacts recorded by schema v1 — see classifyRemoval's legacy fallback.
+   */
+  tree?: string;
+}
+
+export interface Artifact {
+  source: { root: string; visibility: Visibility };
+  placements: StatePlacement[];
+}
+
+export interface StateFile {
+  version: number;
+  machine: string;
+  artifacts: Record<string, Artifact>;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Drift & doctor findings
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type DriftClass = "missing" | "stale" | "modified" | "foreign" | "unsafe";
+
+export interface DriftFinding {
+  drift: DriftClass;
+  skill?: string;
+  path: string;
+  detail: string;
+}
+
+/** Classification of what currently sits at a placement target. */
+export type TargetStatus = "absent" | "adopted" | "owned" | "foreign";
+
+export type FindingSeverity = "info" | "warn" | "error";
+export type FindingCategory =
+  | "broken-link"
+  | "deny-violation"
+  | "registry-contradiction"
+  | "private-leak"
+  | "foreign"
+  | "env-suggestion"
+  | "reconcile";
+
+export interface Finding {
+  category: FindingCategory;
+  severity: FindingSeverity;
+  message: string;
+  skill?: string;
+  path?: string;
+  fixable: boolean;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// explain output
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface SkillExplanation {
+  name: string;
+  source: SkillSource;
+  scoping?: AgentScope;
+  placements: Placement[];
+  /** Allowed agents with no usable dir. */
+  unreachable: string[];
+  /** placement path → incidental readers. */
+  bleed: Record<string, string[]>;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Rendering
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface RenderResult {
+  /** Directory the rendered copy was written to. */
+  path: string;
+  /** sha256 of the rendered SKILL.md. */
+  hash: string;
+  /** sha256 over the full rendered artifact tree (deletion-safety ownership). */
+  tree?: string;
+  /** Files written into the rendered dir. */
+  files: string[];
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Audit
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface AuditEntry {
+  timestamp: string;
+  machine: string;
+  operator: string;
+  verb: string;
+  planHash?: string;
+  summary: string;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CLI plumbing
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface VerbOptions {
+  json: boolean;
+  prune: boolean;
+  yes: boolean;
+  planFile?: string;
+  fix: boolean;
+  /** Positional args (e.g. `explain <skill>`, `root add <path>`). */
+  args: string[];
+}
+
+/** What a verb returns to the CLI shell, which prints json vs human and exits. */
+export interface VerbOutcome {
+  exitCode: number;
+  /** Stable --json shape. */
+  json: unknown;
+  /** Human-pretty rendering for a TTY. */
+  human: string;
+}
+
+export type VerbHandler = (env: SkmEnv, opts: VerbOptions) => Promise<VerbOutcome>;
+
+/** Terraform detailed-exitcode convention. */
+export const ExitCode = {
+  CLEAN: 0,
+  ERROR: 1,
+  PENDING: 2,
+} as const;
+export type ExitCodeValue = (typeof ExitCode)[keyof typeof ExitCode];

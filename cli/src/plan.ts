@@ -1,0 +1,357 @@
+// `skm plan` — compute desired vs state vs disk and emit a reviewable plan.
+// Never mutates. Actions: create (link|render) · adopt · update · prune · noop.
+// Foreign targets, unsafe (privacy) refusals, unreachable agents and bleed are
+// reported alongside the actions. Owned by the plan/resolve team.
+
+import * as crypto from "node:crypto";
+import * as path from "node:path";
+import { loadContext } from "./context";
+import { type SkmEnv, expandTilde } from "./env";
+import { computeDesiredPlacements, dialectForDir } from "./placements";
+import { privacyViolation } from "./privacy";
+import { renderedHash } from "./render";
+import { classifyTarget, scanEntry } from "./scan";
+import { findOwner } from "./state";
+import type {
+  DesiredPlacement,
+} from "./placements";
+import type {
+  AgentOverrides,
+  DesiredState,
+  DriftFinding,
+  ExitCodeValue,
+  MachineConfig,
+  Placement,
+  Plan,
+  PlannedAction,
+  Registry,
+  StateFile,
+  VerbOptions,
+  VerbOutcome,
+  Warning,
+} from "./types";
+import { ExitCode } from "./types";
+
+/** Verb entry: exit 0 when clean, 2 when changes are pending. */
+export async function runPlan(env: SkmEnv, opts: VerbOptions): Promise<VerbOutcome> {
+  const ctx = loadContext(env);
+  const plan = buildPlan(env, ctx.config, ctx.registry, ctx.desired, ctx.state);
+  const exitCode: ExitCodeValue = hasPendingChanges(plan) ? ExitCode.PENDING : ExitCode.CLEAN;
+  return { exitCode, json: plan, human: renderPlanHuman(plan) };
+}
+
+/** Any action other than noop means work is pending. */
+export function hasPendingChanges(plan: Plan): boolean {
+  return plan.actions.some((a) => a.type !== "noop");
+}
+
+/** Diff desired state against ownership state + disk into a plan of actions. */
+export function buildPlan(
+  env: SkmEnv,
+  config: MachineConfig,
+  registry: Registry,
+  desired: DesiredState,
+  state: StateFile,
+): Plan {
+  const solved = computeDesiredPlacements(env, config, registry, desired);
+  const actions: PlannedAction[] = [];
+  const warnings: Warning[] = [...desired.warnings];
+  const foreign: DriftFinding[] = [];
+  const unsafe: DriftFinding[] = [];
+
+  const desiredPaths = new Set<string>(solved.placements.map((dp) => path.resolve(dp.placement.path)));
+
+  for (const dp of solved.placements) {
+    const p = dp.placement;
+
+    if (p.deprecated) {
+      warnings.push({
+        kind: "deprecated-dir",
+        skill: dp.skill,
+        message: `'${dp.skill}' placed in deprecated dir '${p.dir}' (${p.path})`,
+      });
+    }
+
+    // Privacy guard: refuse a private placement inside a disallowed git worktree.
+    if (dp.source.visibility === "private") {
+      const reason = privacyViolation(config, p.path);
+      if (reason) {
+        unsafe.push({ drift: "unsafe", skill: dp.skill, path: p.path, detail: reason });
+        continue;
+      }
+    }
+
+    // A private skill that is unscoped lands in the world-readable shared dir,
+    // where every agent reads it. That is per-spec (scoping, not visibility,
+    // restricts agents) but easy to do by accident, so surface it.
+    if (dp.source.visibility === "private" && p.dir === "shared") {
+      warnings.push({
+        kind: "unscoped-shared",
+        skill: dp.skill,
+        message: `private skill '${dp.skill}' is unscoped → placed in the world-readable shared dir (${p.path}); add scoping to restrict which agents see it`,
+      });
+    }
+
+    if (p.kind === "rendered") {
+      diffRendered(env, dp, state, actions, warnings, foreign);
+    } else {
+      diffSymlink(env, dp, state, actions, foreign);
+    }
+  }
+
+  const requiresPrune = collectPrunes(env, desiredPaths, state, actions);
+  const planHash = planHashOf(desired.hash, actions, requiresPrune);
+
+  return {
+    version: 1,
+    machine: env.machineName,
+    createdAt: env.clock.now(),
+    desiredStateHash: desired.hash,
+    planHash,
+    actions,
+    warnings,
+    unreachable: solved.unreachable,
+    bleed: solved.bleed,
+    foreign,
+    unsafe,
+    requiresPrune,
+  };
+}
+
+/** Stable hash of a plan's effect (actions + preconditions); independent of createdAt. */
+export function planHashOf(
+  desiredStateHash: string,
+  actions: PlannedAction[],
+  requiresPrune: boolean,
+): string {
+  // Hash a canonical JSON of the FULL action array so EVERY semantics-bearing field
+  // is covered. A field left out lets a reviewed --plan file be tampered while still
+  // passing the integrity check (works-1 / finding 4). Concretely, omitting:
+  //   - source.path      → repoint an action at attacker content
+  //   - source.visibility→ flip private→public and bypass the write-time privacy guard
+  //   - placement.dir    → change dialect / override merging of a rendered artifact
+  //   - placement.agent  → flip to/from hermes, changing prune exemption / ownership
+  //   - placement.kind / hash / overrides → change what lands on disk
+  // Keys are sorted recursively and undefined normalized so the hash is deterministic.
+  const canonical = actions
+    .map((a) =>
+      sortKeysDeep({
+        type: a.type,
+        skill: a.skill,
+        placement: {
+          agent: a.placement.agent,
+          dir: a.placement.dir,
+          path: path.resolve(a.placement.path),
+          kind: a.placement.kind,
+          hash: a.placement.hash ?? null,
+          deprecated: a.placement.deprecated ?? null,
+          addOnly: a.placement.addOnly ?? null,
+          bleed: a.placement.bleed ?? null,
+        },
+        // Prune actions carry an empty source path → normalize to null.
+        source: a.source
+          ? {
+              root: a.source.root,
+              visibility: a.source.visibility,
+              path: a.source.path ? path.resolve(a.source.path) : null,
+            }
+          : null,
+        overrides: a.overrides ? sortedOverrides(a.overrides) : null,
+      }),
+    )
+    .sort((x, y) => {
+      const xs = JSON.stringify(x);
+      const ys = JSON.stringify(y);
+      return xs < ys ? -1 : xs > ys ? 1 : 0;
+    });
+  const payload = JSON.stringify({ desiredStateHash, requiresPrune, actions: canonical });
+  return `sha256:${crypto.createHash("sha256").update(payload).digest("hex")}`;
+}
+
+/** Recursively sort object keys and drop undefined so JSON.stringify is deterministic. */
+function sortKeysDeep(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortKeysDeep);
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const key of Object.keys(value as Record<string, unknown>).sort()) {
+      const v = (value as Record<string, unknown>)[key];
+      if (v !== undefined) out[key] = sortKeysDeep(v);
+    }
+    return out;
+  }
+  return value;
+}
+
+/** Stable key-sorted view of an action's frontmatter overrides for hashing. */
+function sortedOverrides(o: AgentOverrides): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const k of Object.keys(o).sort()) {
+    const v = (o as Record<string, string | undefined>)[k];
+    if (v !== undefined) out[k] = v;
+  }
+  return out;
+}
+
+// ── diffing ──────────────────────────────────────────────────────────────────
+
+function baseAction(dp: DesiredPlacement, type: PlannedAction["type"], placement: Placement): PlannedAction {
+  const action: PlannedAction = {
+    type,
+    skill: dp.skill,
+    placement,
+    source: dp.source,
+  };
+  if (Object.keys(dp.desiredSkill.overrides).length > 0) {
+    action.overrides = dp.desiredSkill.overrides;
+  }
+  return action;
+}
+
+function diffSymlink(
+  env: SkmEnv,
+  dp: DesiredPlacement,
+  state: StateFile,
+  actions: PlannedAction[],
+  foreign: DriftFinding[],
+): void {
+  const p = dp.placement;
+  const owner = findOwner(state, p.path);
+  const status = classifyTarget(env, p.path, dp.source.path);
+
+  if (status === "absent") {
+    actions.push(baseAction(dp, "create", p));
+  } else if (status === "adopted") {
+    actions.push(baseAction(dp, owner ? "noop" : "adopt", p));
+  } else {
+    // Foreign content at target.
+    if (owner) {
+      const entry = scanEntry(env, p.path);
+      if (entry.kind === "symlink") {
+        // Our owned symlink was re-pointed; unlinking a link loses no content → repair.
+        actions.push(baseAction(dp, "create", { ...p }));
+      } else {
+        // A real dir/file replaced our symlink → user content. Never clobber (DEL-1).
+        foreign.push({
+          drift: "foreign",
+          skill: dp.skill,
+          path: p.path,
+          detail: `owned symlink replaced by ${entry.kind}; not overwritten`,
+        });
+      }
+    } else {
+      foreign.push({ drift: "foreign", skill: dp.skill, path: p.path, detail: describeForeign(env, p.path) });
+    }
+  }
+}
+
+function diffRendered(
+  env: SkmEnv,
+  dp: DesiredPlacement,
+  state: StateFile,
+  actions: PlannedAction[],
+  warnings: Warning[],
+  foreign: DriftFinding[],
+): void {
+  const p = dp.placement;
+  const dialect = dialectForDir(p.dir);
+  if (!dialect) {
+    // Should not happen (only first-party dirs render); fall back to symlink diff.
+    diffSymlink(env, dp, state, actions, foreign);
+    return;
+  }
+  const expectedHash = renderedHash(dp.desiredSkill, dialect);
+  const rendered: Placement = { ...p, hash: expectedHash };
+  const owner = findOwner(state, p.path);
+  const entry = scanEntry(env, p.path);
+
+  if (entry.kind === "absent") {
+    actions.push(baseAction(dp, "create", rendered));
+    return;
+  }
+  if (entry.kind === "dir") {
+    const diskHash = entry.sha256OfSkillMd;
+    if (owner) {
+      if (diskHash === owner.placement.hash) {
+        actions.push(baseAction(dp, owner.placement.hash === expectedHash ? "noop" : "update", rendered));
+      } else {
+        warnings.push({
+          kind: "modified",
+          skill: dp.skill,
+          message: `rendered artifact '${dp.skill}' at ${p.path} was hand-edited; not overwritten (doctor --fix re-renders)`,
+        });
+      }
+    } else if (diskHash === expectedHash) {
+      actions.push(baseAction(dp, "adopt", rendered));
+    } else {
+      foreign.push({ drift: "foreign", skill: dp.skill, path: p.path, detail: "unmanaged directory" });
+    }
+    return;
+  }
+  // A symlink/file sits where a rendered dir belongs.
+  if (owner && entry.kind === "symlink") {
+    // Unlinking a link loses no content → repair by re-rendering.
+    actions.push(baseAction(dp, "create", rendered));
+  } else {
+    foreign.push({ drift: "foreign", skill: dp.skill, path: p.path, detail: describeForeign(env, p.path) });
+  }
+}
+
+/** State-owned placements no longer desired become prune actions (hermes exempt). */
+function collectPrunes(
+  env: SkmEnv,
+  desiredPaths: Set<string>,
+  state: StateFile,
+  actions: PlannedAction[],
+): boolean {
+  let requiresPrune = false;
+  for (const [skill, artifact] of Object.entries(state.artifacts)) {
+    for (const sp of artifact.placements) {
+      const abs = path.resolve(expandTilde(env, sp.path));
+      if (desiredPaths.has(abs)) continue;
+      if (sp.agent === "hermes") continue; // add-only: never pruned
+      const placement: Placement = {
+        agent: sp.agent,
+        dir: sp.agent,
+        path: expandTilde(env, sp.path),
+        kind: sp.kind,
+        hash: sp.hash,
+      };
+      actions.push({ type: "prune", skill, placement, source: { root: artifact.source.root, visibility: artifact.source.visibility, path: "" } });
+      requiresPrune = true;
+    }
+  }
+  return requiresPrune;
+}
+
+function describeForeign(env: SkmEnv, targetPath: string): string {
+  const entry = scanEntry(env, targetPath);
+  if (entry.kind === "symlink") {
+    return entry.broken
+      ? `broken symlink -> ${entry.linkTarget ?? "?"}`
+      : `unmanaged symlink -> ${entry.resolvedTarget}`;
+  }
+  return `unmanaged ${entry.kind}`;
+}
+
+// ── human rendering ────────────────────────────────────────────────────────
+
+function renderPlanHuman(plan: Plan): string {
+  const lines: string[] = [];
+  const changes = plan.actions.filter((a) => a.type !== "noop");
+  if (changes.length === 0) {
+    lines.push("No changes. Placements are in sync.");
+  } else {
+    lines.push(`Plan: ${changes.length} action(s)`);
+    for (const a of changes) {
+      const verb = a.type === "create" ? `create ${a.placement.kind}` : a.type;
+      lines.push(`  ${verb.padEnd(16)} ${a.skill}  →  ${a.placement.path}`);
+    }
+  }
+  for (const w of plan.warnings) lines.push(`  ! ${w.kind}: ${w.message}`);
+  for (const u of plan.unreachable) lines.push(`  · unreachable: ${u.skill} → ${u.agent}`);
+  for (const b of plan.bleed) lines.push(`  · bleed: ${b.skill} @ ${b.path} visible to ${b.readers.join(", ")}`);
+  for (const f of plan.foreign) lines.push(`  × foreign: ${f.path} (${f.detail})`);
+  for (const s of plan.unsafe) lines.push(`  ⚠ unsafe: ${s.skill} → ${s.path} (${s.detail})`);
+  if (plan.requiresPrune) lines.push("  (prune actions present; re-run apply with --prune to execute)");
+  return lines.join("\n");
+}

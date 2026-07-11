@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "note": "Agent scoping for public-catalog skills. A skill absent here is unscoped (shared path). Per skill: { \"agents\": { \"allow\": [...] } } XOR { \"agents\": { \"deny\": [...] } }. See docs/skills-manager-design.md §5/§7.",
+  "skills": {}
+}
