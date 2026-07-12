@@ -266,7 +266,7 @@ function materialize(
       return { drift: "stale", skill: action.skill, path: abs, detail: "gated render changed since plan (source or override edited); re-run plan" };
     }
     removeExisting(abs);
-    writeGatedTree(tree, abs);
+    writeGatedTree(tree, abs, src.path);
     upsertPlacement(state, keyOf(action), source, { agent: p.agent, path: abs, kind: "rendered", hash: treeHash, tree: treeHashOf(abs), gated: true });
   } else if (p.derived) {
     // Derived skill: render-only SKILL.md dir (no source tree to copy).

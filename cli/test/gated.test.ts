@@ -250,9 +250,29 @@ describe("tree-hash content binding", () => {
     };
     const tree = renderGatedTree(skill, "codex", "codex", reg());
     const target = path.join(sandbox.base, "out");
-    writeGatedTree(tree, target);
+    writeGatedTree(tree, target, src);
     expect(treeHashOf(target)).toBe(hashGatedTree(tree));
     expect(gatedTreeHash(skill, "codex", "codex", reg())).toBe(hashGatedTree(tree));
+  });
+
+  test("writeGatedTree preserves source executable bits", () => {
+    sandbox = makeSandbox();
+    const root = makeRoot(sandbox, "public");
+    const src = makeSkill(root.path, "fleet-update", { frontmatter: { "disable-model-invocation": true } });
+    fs.mkdirSync(path.join(src, "scripts"));
+    fs.writeFileSync(path.join(src, "scripts", "run.sh"), "#!/bin/sh\n");
+    fs.chmodSync(path.join(src, "scripts", "run.sh"), 0o755);
+    const skill: DesiredSkill = {
+      name: "fleet-update",
+      source: { root: "public", visibility: "public", path: src },
+      overrides: {},
+      gated: true,
+    };
+    const target = path.join(sandbox.base, "out");
+    writeGatedTree(renderGatedTree(skill, "codex", "codex", reg()), target, src);
+    expect(fs.statSync(path.join(target, "scripts", "run.sh")).mode & 0o111).not.toBe(0);
+    // The generated companion has no source counterpart; default mode, not executable.
+    expect(fs.statSync(path.join(target, "agents", "openai.yaml")).mode & 0o111).toBe(0);
   });
 
   test("computeDesiredPlacements binds the full-tree hash on gated placements", () => {
@@ -525,7 +545,7 @@ describe("gated state recording (adopt / no-op)", () => {
       gated: true,
     };
     const target = path.join(sandbox.home, ".codex/skills/fleet-update");
-    writeGatedTree(renderGatedTree(skill, "codex", "codex", reg()), target);
+    writeGatedTree(renderGatedTree(skill, "codex", "codex", reg()), target, src);
 
     const pre = loadContext(sandbox.env);
     const prePlan = buildPlan(sandbox.env, pre.config, pre.registry, pre.desired, pre.state);

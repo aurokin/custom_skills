@@ -179,13 +179,21 @@ export function gatedTreeHash(skill: DesiredSkill, agentId: string, dir: string,
   return hashGatedTree(renderGatedTree(skill, agentId, dir, registry));
 }
 
-/** Write a rendered gated tree into `targetDir` (mkdir -p each file's parent). */
-export function writeGatedTree(tree: GatedTree, targetDir: string): void {
+/**
+ * Write a rendered gated tree into `targetDir` (mkdir -p each file's parent),
+ * replicating each source file's mode so executable helpers stay executable
+ * (writeFileSync alone would land scripts as 0644; non-gated placements keep
+ * modes via copyFileSync/symlink). skm-generated files with no source
+ * counterpart (a generated companion) keep the default mode.
+ */
+export function writeGatedTree(tree: GatedTree, targetDir: string, sourceDir: string): void {
   fs.mkdirSync(targetDir, { recursive: true });
   for (const rel of Object.keys(tree)) {
     const abs = path.join(targetDir, rel);
     fs.mkdirSync(path.dirname(abs), { recursive: true });
     fs.writeFileSync(abs, tree[rel]!);
+    const srcAbs = path.join(sourceDir, rel);
+    if (fs.existsSync(srcAbs)) fs.chmodSync(abs, fs.statSync(srcAbs).mode & 0o777);
   }
 }
 
