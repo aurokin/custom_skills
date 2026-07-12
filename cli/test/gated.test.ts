@@ -419,6 +419,68 @@ describe("gated ↔ ungated transitions", () => {
     expect(fs.readFileSync(path.join(claudeSkill, "SKILL.md"), "utf8")).toContain("user edit");
   });
 
+  test("status reports the gated → ungated-with-override transition stale (plan/status parity)", async () => {
+    sandbox = makeSandbox();
+    const root = makeRoot(sandbox, "public");
+    makeSkill(root.path, "fleet-update", {
+      frontmatter: { "disable-model-invocation": true },
+      agentsYaml: { claude: { model: "opus" } },
+    });
+    writeMachineConfig(sandbox, { version: 1, roots: [root], agents: ["claude-code"] });
+    await runApply(sandbox.env, opts());
+
+    // Remove the gate; keep the override → desired kind stays "rendered" at the same
+    // path, but the desired placement is no longer gated (hash unset for plain
+    // renders), so ONLY the no-longer-gated check can catch it.
+    makeSkill(root.path, "fleet-update", { agentsYaml: { claude: { model: "opus" } } });
+    const claudeSkill = path.join(sandbox.home, ".claude/skills/fleet-update");
+
+    const mid = loadContext(sandbox.env);
+    // plan emits update for the claude path...
+    const midPlan = buildPlan(sandbox.env, mid.config, mid.registry, mid.desired, mid.state);
+    expect(midPlan.actions.some((a) => a.type === "update" && a.placement.path === claudeSkill)).toBe(true);
+    // ...and status must say so too (three-way contract), not read the untouched tree as clean.
+    const drift = computeDrift(sandbox.env, mid.config, mid.registry, mid.desired, mid.state);
+    expect(drift.some((d) => d.drift === "stale" && d.path === claudeSkill && d.detail.includes("no longer gated"))).toBe(true);
+
+    await runApply(sandbox.env, opts());
+    const c = loadContext(sandbox.env);
+    expect(computeDrift(sandbox.env, c.config, c.registry, c.desired, c.state)).toEqual([]);
+  });
+
+  test("status reports the gated → ungated-to-symlink transition stale (kind changed)", async () => {
+    sandbox = makeSandbox();
+    const root = makeRoot(sandbox, "public");
+    makeSkill(root.path, "fleet-update", { frontmatter: { "disable-model-invocation": true } });
+    writeMachineConfig(sandbox, { version: 1, roots: [root], agents: ["claude-code"] });
+    await runApply(sandbox.env, opts());
+
+    makeSkill(root.path, "fleet-update"); // remove the gate; no override → desired symlink
+    const claudeSkill = path.join(sandbox.home, ".claude/skills/fleet-update");
+
+    const mid = loadContext(sandbox.env);
+    const drift = computeDrift(sandbox.env, mid.config, mid.registry, mid.desired, mid.state);
+    expect(drift.some((d) => d.drift === "stale" && d.path === claudeSkill && d.detail.includes("desired kind changed"))).toBe(true);
+
+    await runApply(sandbox.env, opts());
+    const c = loadContext(sandbox.env);
+    expect(computeDrift(sandbox.env, c.config, c.registry, c.desired, c.state)).toEqual([]);
+  });
+
+  test("a still-gated unmodified placement stays clean in status", async () => {
+    sandbox = makeSandbox();
+    const root = makeRoot(sandbox, "public");
+    makeSkill(root.path, "fleet-update", {
+      frontmatter: { "disable-model-invocation": true },
+      agentsYaml: { claude: { model: "opus" } },
+    });
+    writeMachineConfig(sandbox, { version: 1, roots: [root], agents: ["claude-code"] });
+    await runApply(sandbox.env, opts());
+
+    const c = loadContext(sandbox.env);
+    expect(computeDrift(sandbox.env, c.config, c.registry, c.desired, c.state)).toEqual([]);
+  });
+
   test("ungated → gated converges: owned symlinks become gated trees, shared prunes", async () => {
     sandbox = makeSandbox();
     const root = makeRoot(sandbox, "public");

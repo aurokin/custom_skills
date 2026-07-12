@@ -111,6 +111,17 @@ export function computeDrift(
           findings.push({ drift: "stale", skill, path: sp.path, detail: "owned placement no longer desired" });
           continue;
         }
+        // Gated→ungated transition (ADR 0011): the desired placement is no longer
+        // gated, so its hash is NOT a tree hash (unset for a plain render — plan
+        // computes that itself; a desired symlink was already caught by the
+        // kind-changed check above). The recorded tree can never legitimately match
+        // the desired render, and plan unconditionally emits update here — the hash
+        // compare below would read `undefined` as clean and break the three-way
+        // contract (status silent while plan has work).
+        if (sp.gated && !dp.placement.gated) {
+          findings.push({ drift: "stale", skill, path: sp.path, detail: "desired render is no longer gated; re-run plan" });
+          continue;
+        }
         if (dp.placement.hash !== undefined && dp.placement.hash !== sp.tree) {
           findings.push({ drift: "stale", skill, path: sp.path, detail: `desired ${noun} render changed since apply; re-run plan` });
         }
