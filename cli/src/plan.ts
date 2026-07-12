@@ -600,12 +600,15 @@ function diffTpromptFile(
 /**
  * State-owned placements no longer desired become prune actions (hermes exempt).
  *
- * Gated exception (ADR 0011): a stale placement of a skill that is gated in the
- * CURRENT desired state (e.g. the old shared-root symlink after an ungated→gated
- * transition) is a required removal, not an optional cleanup — leaving it behind
- * keeps the skill model-invocable through the very dirs the gate forbids. Such
- * actions carry reason "gated-transition" and executePlan runs them WITHOUT
- * --prune (they do not set requiresPrune). The deletion invariant is unchanged:
+ * Gated exception (ADR 0011): a stale UNGATED placement of a skill that is gated
+ * in the CURRENT desired state (e.g. the old shared-root symlink after an
+ * ungated→gated transition) is a required removal, not an optional cleanup —
+ * leaving it behind keeps the skill model-invocable through the very dirs the
+ * gate forbids. Such actions carry reason "gated-transition" and executePlan runs
+ * them WITHOUT --prune (they do not set requiresPrune). A stale placement that is
+ * itself a gated render (sp.gated — e.g. an own-dir tree orphaned by narrowing
+ * scope or disabling the agent) still enforces its gate wherever it sits, so it
+ * stays an ordinary --prune-gated cleanup. The deletion invariant is unchanged:
  * only state-owned paths, still gated by classifyRemoval at execute time. Hermes
  * stays add-only exempt even here (the invariant wins); doctor's gated-leak scan
  * flags any leftover there.
@@ -639,7 +642,7 @@ function collectPrunes(
         ...(sp.gated ? { gated: true } : {}),
         ...(sp.agent === "tprompt" ? { channel: "tprompt" as const } : {}),
       };
-      const required = artifact.type === "skill" && gatedSkillNames.has(artifact.name);
+      const required = artifact.type === "skill" && gatedSkillNames.has(artifact.name) && sp.gated !== true;
       actions.push({
         type: "prune",
         skill: artifact.name,

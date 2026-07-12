@@ -478,6 +478,28 @@ describe("gated ↔ ungated transitions", () => {
     expect(fs.readFileSync(path.join(claudeSkill, "SKILL.md"), "utf8")).toContain("user edit");
   });
 
+  test("narrowing a gated skill's agents keeps the orphaned gated tree behind --prune", async () => {
+    sandbox = makeSandbox();
+    const root = makeRoot(sandbox, "public");
+    makeSkill(root.path, "fleet-update", { frontmatter: { "disable-model-invocation": true } });
+    writeMachineConfig(sandbox, { version: 1, roots: [root], agents: ["claude-code", "codex"] });
+    await runApply(sandbox.env, opts());
+
+    // Disable codex: its own-dir tree goes stale, but it is still a GATED render —
+    // no exposure, so removal stays an ordinary --prune-gated cleanup.
+    writeMachineConfig(sandbox, { version: 1, roots: [root], agents: ["claude-code"] });
+    const c = loadContext(sandbox.env);
+    const plan = buildPlan(sandbox.env, c.config, c.registry, c.desired, c.state);
+    const codexPrune = plan.actions.find((a) => a.type === "prune" && a.placement.agent === "codex");
+    expect(codexPrune?.reason).toBeUndefined();
+    expect(plan.requiresPrune).toBe(true);
+
+    await runApply(sandbox.env, opts()); // no --prune → tree must survive
+    expect(fs.existsSync(path.join(sandbox.home, ".codex/skills/fleet-update"))).toBe(true);
+    await runApply(sandbox.env, opts({ prune: true }));
+    expect(fs.existsSync(path.join(sandbox.home, ".codex/skills/fleet-update"))).toBe(false);
+  });
+
   test("gated → ungated with the tree replaced by a regular file: foreign, not a crash", async () => {
     sandbox = makeSandbox();
     const root = makeRoot(sandbox, "public");
