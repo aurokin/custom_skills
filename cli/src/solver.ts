@@ -171,7 +171,14 @@ function solveGated(skill: DesiredSkill, registry: Registry, enabled: string[]):
     // No-gate agents get the skill only through an explicit permissive opt-in.
     if (!gateHonored(agent.skillInvocation?.gate) && !permissive.has(agentId)) continue;
     const dir = agent.ownDir;
-    if (dir === undefined || dir === "shared") {
+    if (dir === undefined) {
+      // Unreachable for a validated registry (supported implies ownDir), but a
+      // missing dir is "no usable dir", not a shared placement — report like any
+      // other unusable-dir candidate instead of failing the whole gated plan.
+      if (allowMode) unreachable.push(agentId);
+      continue;
+    }
+    if (dir === "shared") {
       forcedShared.push(agentId); // would occupy a shared root — hard error below
       continue;
     }

@@ -120,6 +120,22 @@ describe("solveGated — placement matrix", () => {
     expect(r.placements.map((p) => p.agent)).toEqual(["claude-code"]);
   });
 
+  test("a gate-honoring agent with no ownDir is skipped/unreachable, not a shared error", () => {
+    const mutated: Registry = JSON.parse(JSON.stringify(reg()));
+    delete mutated.agents["claude-code"]!.ownDir; // invalid registry shape, but no shared placement is requested
+    const config: MachineConfig = { version: 1, roots: [], agents: ["claude-code", "codex"] };
+    const unscoped = solvePlacements(gatedDesired("fleet-update"), config, mutated);
+    expect(unscoped.placements.map((p) => p.agent)).toEqual(["codex"]); // others still place
+    expect(unscoped.unreachable).toEqual([]);
+    const allowed = solvePlacements(
+      gatedDesired("fleet-update", { scoping: { allow: ["claude-code", "codex"] } }),
+      config,
+      mutated,
+    );
+    expect(allowed.placements.map((p) => p.agent)).toEqual(["codex"]);
+    expect(allowed.unreachable).toEqual(["claude-code"]);
+  });
+
   test("forced shared root is a hard error (ownDir resolves to the shared dir)", () => {
     const mutated: Registry = JSON.parse(JSON.stringify(reg()));
     mutated.agents["claude-code"]!.ownDir = "shared"; // config forcing a shared root
