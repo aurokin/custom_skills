@@ -132,7 +132,10 @@ export function executePlan(
         break;
       }
       case "prune":
-        if (opts.prune) {
+        // reason "gated-transition" prunes are required for safety (the stale
+        // placement of a now-gated skill stays model-invocable until removed) and
+        // run without --prune; prune() still routes through classifyRemoval.
+        if (opts.prune || action.reason === "gated-transition") {
           const skip = prune(env, action, state);
           if (skip) refused.push(skip);
         }
@@ -434,7 +437,9 @@ function summarize(
   const counts: Record<string, number> = {};
   const byType: Record<string, number> = {};
   for (const a of plan.actions) {
-    if (a.type === "prune" && !prune) {
+    // Gated-transition prunes execute even without --prune (executePlan), so they
+    // count as performed prunes, never as skipped.
+    if (a.type === "prune" && !prune && a.reason !== "gated-transition") {
       counts["prune-skipped"] = (counts["prune-skipped"] ?? 0) + 1;
     } else {
       counts[a.type] = (counts[a.type] ?? 0) + 1;

@@ -17,10 +17,10 @@ import { loadOverlay, overlayPath } from "../src/overlay";
 import { computeDesiredPlacements } from "../src/placements";
 import { buildPlan } from "../src/plan";
 import { loadRegistry } from "../src/registry";
-import { treeHashOf } from "../src/render";
+import { renderSkill, treeHashOf } from "../src/render";
 import { resolveDesiredState } from "../src/resolve";
 import { solvePlacements } from "../src/solver";
-import { loadState } from "../src/state";
+import { loadState, saveState, upsertPlacement } from "../src/state";
 import { computeDrift } from "../src/status";
 import type { SkmEnv } from "../src/env";
 import type { DesiredSkill, MachineConfig, Registry, VerbOptions } from "../src/types";
@@ -230,6 +230,29 @@ describe("companion (agents/openai.yaml) emission", () => {
       gated: true,
     };
     expect(() => renderGatedTree(skill, "codex", "codex", reg())).toThrow(GatingError);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Gated source validation
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("gated source validation", () => {
+  test("a symlink inside a gated skill source is a hard error, not silent materialization", () => {
+    sandbox = makeSandbox();
+    const root = makeRoot(sandbox, "public");
+    const src = makeSkill(root.path, "fleet-update", { frontmatter: { "disable-model-invocation": true } });
+    // A file symlink would previously be read-through and written back as a real
+    // file (silently materialized); a dir/dangling one would crash the render.
+    fs.symlinkSync(path.join(src, "SKILL.md"), path.join(src, "alias.md"));
+    const skill: DesiredSkill = {
+      name: "fleet-update",
+      source: { root: "public", visibility: "public", path: src },
+      overrides: {},
+      gated: true,
+    };
+    expect(() => renderGatedTree(skill, "claude-code", "claude", reg())).toThrow(GatingError);
+    expect(() => renderGatedTree(skill, "claude-code", "claude", reg())).toThrow(/symlink/);
   });
 });
 
@@ -484,6 +507,83 @@ describe("gated ↔ ungated transitions", () => {
 
     await runApply(sandbox.env, opts());
     const c = loadContext(sandbox.env);
+    expect(computeDrift(sandbox.env, c.config, c.registry, c.desired, c.state)).toEqual([]);
+  });
+
+  test("ungated → gated: the stale shared symlink is removed by a normal apply without --prune", async () => {
+    sandbox = makeSandbox();
+    const root = makeRoot(sandbox, "public");
+    makeSkill(root.path, "fleet-update");
+    writeMachineConfig(sandbox, { version: 1, roots: [root], agents: ["claude-code", "codex"] });
+    await runApply(sandbox.env, opts());
+    const sharedPath = path.join(sandbox.home, ".agents/skills/fleet-update");
+    expect(fs.lstatSync(sharedPath).isSymbolicLink()).toBe(true);
+
+    // Author gates the skill: the stale shared symlink is a REQUIRED removal (the
+    // skill would stay model-invocable through the shared root), not an optional prune.
+    makeSkill(root.path, "fleet-update", { frontmatter: { "disable-model-invocation": true } });
+    const mid = loadContext(sandbox.env);
+    const midPlan = buildPlan(sandbox.env, mid.config, mid.registry, mid.desired, mid.state);
+    const pruneAction = midPlan.actions.find((a) => a.type === "prune");
+    expect(pruneAction?.placement.path).toBe(sharedPath);
+    expect(pruneAction?.reason).toBe("gated-transition");
+    expect(midPlan.requiresPrune).toBe(false); // required removals do not demand --prune
+
+    await runApply(sandbox.env, opts()); // NO --prune
+    expect(fs.existsSync(sharedPath)).toBe(false);
+    expect(fs.lstatSync(path.join(sandbox.home, ".claude/skills/fleet-update")).isSymbolicLink()).toBe(false);
+    expect(fs.existsSync(path.join(sandbox.home, ".codex/skills/fleet-update/agents/openai.yaml"))).toBe(true);
+
+    const c = loadContext(sandbox.env);
+    const plan = buildPlan(sandbox.env, c.config, c.registry, c.desired, c.state);
+    expect(plan.actions.every((a) => a.type === "noop")).toBe(true);
+    expect(computeDrift(sandbox.env, c.config, c.registry, c.desired, c.state)).toEqual([]);
+  });
+
+  test("upgrade path: a pre-gated identical non-gated render converges to a gated record", async () => {
+    sandbox = makeSandbox();
+    const root = makeRoot(sandbox, "public");
+    makeSkill(root.path, "fleet-update", {
+      frontmatter: { "disable-model-invocation": true },
+      agentsYaml: { claude: { model: "opus" } },
+    });
+    writeMachineConfig(sandbox, { version: 1, roots: [root], agents: ["claude-code"] });
+
+    // Simulate a PRE-gated skm apply: a normal first-party render + a non-gated
+    // state record (hash = SKILL.md sha, no `gated` marker).
+    const c0 = loadContext(sandbox.env);
+    const desiredSkill = c0.desired.skills[0]!;
+    const target = path.join(sandbox.home, ".claude/skills/fleet-update");
+    const res = renderSkill(sandbox.env, desiredSkill, "claude", target);
+    const st = loadState(sandbox.env);
+    upsertPlacement(st, "skill:fleet-update", { root: "public", visibility: "public" }, {
+      agent: "claude-code",
+      path: target,
+      kind: "rendered",
+      hash: res.hash,
+      ...(res.tree ? { tree: res.tree } : {}),
+    });
+    saveState(sandbox.env, st);
+    // The finding's premise: for a no-companion agent the bytes are IDENTICAL, so
+    // only the record's gatedness distinguishes old from new.
+    expect(res.tree).toBe(gatedTreeHash(desiredSkill, "claude-code", "claude", reg()));
+
+    // plan must refresh the record (update), not noop it into a permanent stale
+    // record; status must agree (three-way contract).
+    const mid = loadContext(sandbox.env);
+    const midPlan = buildPlan(sandbox.env, mid.config, mid.registry, mid.desired, mid.state);
+    expect(midPlan.actions.find((a) => a.placement.path === target)?.type).toBe("update");
+    const drift = computeDrift(sandbox.env, mid.config, mid.registry, mid.desired, mid.state);
+    expect(drift.some((d) => d.path === target && d.drift === "stale" && d.detail.includes("now gated"))).toBe(true);
+
+    await runApply(sandbox.env, opts());
+    const sp = loadState(sandbox.env).artifacts["skill:fleet-update"]!.placements.find((p) => p.path === target)!;
+    expect(sp.gated).toBe(true);
+    // With the record converged, doctor's live-exposure advisory now fires
+    // (opencode reads the claude dir and ignores the gate).
+    const c = loadContext(sandbox.env);
+    expect(diagnose(sandbox.env, c.config, c.registry, c.desired, c.state)
+      .some((f) => f.category === "gated-leak" && f.severity === "warn")).toBe(true);
     expect(computeDrift(sandbox.env, c.config, c.registry, c.desired, c.state)).toEqual([]);
   });
 

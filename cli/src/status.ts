@@ -170,6 +170,15 @@ export function computeDrift(
           findings.push({ drift: "stale", skill, path: sp.path, detail: "owned placement no longer desired" });
           continue;
         }
+        // Ungated→gated record upgrade (ADR 0011): the desired placement is gated but
+        // the owned record predates gating (a pre-gated skm rendered IDENTICAL bytes
+        // for frontmatter-gate first-party agents — no companion differentiates them).
+        // plan emits update to refresh the record; the renderedHash compare below
+        // would read the identical bytes as clean and break the three-way contract.
+        if (dp.placement.gated && !sp.gated) {
+          findings.push({ drift: "stale", skill, path: sp.path, detail: "desired render is now gated; re-run plan" });
+          continue;
+        }
         // Disk matches state — but does state still match what plan WOULD render? A
         // source/override edit after apply changes the desired render while disk stays
         // at the old bytes, so plan would emit an update. Compare to the currently

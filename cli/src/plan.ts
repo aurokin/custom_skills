@@ -167,7 +167,11 @@ export function buildPlan(
     }
   }
 
-  const requiresPrune = collectPrunes(env, desiredPaths, state, actions, solved.tprompt.available);
+  // Names of skills that are gated in the CURRENT desired state: their stale
+  // placements (e.g. the old shared-root symlink after an ungated→gated transition)
+  // become required removals, not optional prunes — see collectPrunes.
+  const gatedSkillNames = new Set(desired.skills.filter((s) => s.gated).map((s) => s.name));
+  const requiresPrune = collectPrunes(env, desiredPaths, state, actions, solved.tprompt.available, gatedSkillNames);
   const planHash = planHashOf(desired.hash, actions, requiresPrune);
 
   return {
@@ -241,6 +245,10 @@ export function planHashOf(
             }
           : null,
         overrides: a.overrides ? sortedOverrides(a.overrides) : null,
+        // reason "gated-transition" makes a prune execute WITHOUT --prune; omitting it
+        // would let a tampered --plan file flip an optional prune into a flag-bypassing
+        // deletion while passing integrity.
+        reason: a.reason ?? null,
       }),
     )
     .sort((x, y) => {
@@ -450,7 +458,15 @@ function diffTreeRendered(
     if (owner) {
       const recordedTree = owner.placement.tree;
       if (recordedTree && diskTree === recordedTree) {
-        actions.push(baseAction(dp, recordedTree === expectedHash ? "noop" : "update", p));
+        // Upgrade path (ADR 0011): a pre-gated skm may have applied this IDENTICAL
+        // tree as a non-gated render — for frontmatter-gate first-party agents no
+        // companion differentiates the bytes — leaving owner.placement.gated unset.
+        // A noop never calls recordPlacement, so the record would never converge:
+        // doctor's live-exposure (keyed on sp.gated) stays silent and status uses
+        // the SKILL.md-sha arm. Force an update to refresh the record when the
+        // desired placement is gated but the owned record is not.
+        const recordStale = p.gated === true && owner.placement.gated !== true;
+        actions.push(baseAction(dp, recordedTree === expectedHash && !recordStale ? "noop" : "update", p));
       } else {
         // Disk diverged from skm's recorded render → hand-edited. Tree-rendered
         // placements are non-fixable, so the remedy is remove-then-re-apply.
@@ -581,13 +597,26 @@ function diffTpromptFile(
   }
 }
 
-/** State-owned placements no longer desired become prune actions (hermes exempt). */
+/**
+ * State-owned placements no longer desired become prune actions (hermes exempt).
+ *
+ * Gated exception (ADR 0011): a stale placement of a skill that is gated in the
+ * CURRENT desired state (e.g. the old shared-root symlink after an ungated→gated
+ * transition) is a required removal, not an optional cleanup — leaving it behind
+ * keeps the skill model-invocable through the very dirs the gate forbids. Such
+ * actions carry reason "gated-transition" and executePlan runs them WITHOUT
+ * --prune (they do not set requiresPrune). The deletion invariant is unchanged:
+ * only state-owned paths, still gated by classifyRemoval at execute time. Hermes
+ * stays add-only exempt even here (the invariant wins); doctor's gated-leak scan
+ * flags any leftover there.
+ */
 function collectPrunes(
   env: SkmEnv,
   desiredPaths: Set<string>,
   state: StateFile,
   actions: PlannedAction[],
   tpromptAvailable: boolean,
+  gatedSkillNames: Set<string>,
 ): boolean {
   let requiresPrune = false;
   for (const artifact of Object.values(state.artifacts)) {
@@ -610,8 +639,15 @@ function collectPrunes(
         ...(sp.gated ? { gated: true } : {}),
         ...(sp.agent === "tprompt" ? { channel: "tprompt" as const } : {}),
       };
-      actions.push({ type: "prune", skill: artifact.name, placement, source: { root: artifact.source.root, visibility: artifact.source.visibility, path: "" } });
-      requiresPrune = true;
+      const required = artifact.type === "skill" && gatedSkillNames.has(artifact.name);
+      actions.push({
+        type: "prune",
+        skill: artifact.name,
+        placement,
+        source: { root: artifact.source.root, visibility: artifact.source.visibility, path: "" },
+        ...(required ? { reason: "gated-transition" } : {}),
+      });
+      if (!required) requiresPrune = true;
     }
   }
   return requiresPrune;

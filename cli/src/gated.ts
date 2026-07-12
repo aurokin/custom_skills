@@ -83,7 +83,7 @@ const FIRST_PARTY_DIR_DIALECT: Record<string, "claude" | "copilot" | "codex"> = 
  */
 export function renderGatedTree(skill: DesiredSkill, agentId: string, dir: string, registry: Registry): GatedTree {
   const tree: GatedTree = {};
-  for (const rel of listSourceFiles(skill.source.path)) {
+  for (const rel of listSourceFiles(skill.source.path, skill.name)) {
     tree[rel] = fs.readFileSync(path.join(skill.source.path, rel));
   }
 
@@ -197,12 +197,24 @@ export function writeGatedTree(tree: GatedTree, targetDir: string, sourceDir: st
   }
 }
 
-/** Relative paths of every regular file under `dir` (recursively, sorted). */
-function listSourceFiles(dir: string, rel = ""): string[] {
+/**
+ * Relative paths of every regular file under `dir` (recursively, sorted). Symlinks
+ * inside a gated source are rejected outright (GatingError): a gated tree is a
+ * rendered COPY, so a symlinked member would be silently materialized (file target),
+ * crash the render with EISDIR (dir target), or ENOENT (dangling) — almost certainly
+ * an authoring mistake, never something to paper over.
+ */
+function listSourceFiles(dir: string, skillName: string, rel = ""): string[] {
   const out: string[] = [];
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const childRel = rel ? path.join(rel, entry.name) : entry.name;
-    if (entry.isDirectory()) out.push(...listSourceFiles(path.join(dir, entry.name), childRel));
+    if (entry.isSymbolicLink()) {
+      throw new GatingError(
+        `gated skill '${skillName}' source contains a symlink at ${childRel}; ` +
+          `gated trees are rendered copies — replace it with a real file`,
+      );
+    }
+    if (entry.isDirectory()) out.push(...listSourceFiles(path.join(dir, entry.name), skillName, childRel));
     else out.push(childRel);
   }
   return out.sort();
