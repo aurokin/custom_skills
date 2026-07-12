@@ -17,6 +17,7 @@ import type { SkmEnv } from "./env";
 import { appendAudit, makeAuditEntry } from "./audit";
 import { loadMachineConfig } from "./machine-config";
 import { composedTreeFromSource, treeHashOfMemory, writeComposedTree } from "./composed/render";
+import { hashGatedTree, renderGatedTree, writeGatedTree } from "./gated";
 import { buildPlan, planHashOf } from "./plan";
 import { dialectForDir } from "./placements";
 import { privacyViolation } from "./privacy";
@@ -131,7 +132,10 @@ export function executePlan(
         break;
       }
       case "prune":
-        if (opts.prune) {
+        // reason "gated-transition" prunes are required for safety (the stale
+        // placement of a now-gated skill stays model-invocable until removed) and
+        // run without --prune; prune() still routes through classifyRemoval.
+        if (opts.prune || action.reason === "gated-transition") {
           const skip = prune(env, action, state);
           if (skip) refused.push(skip);
         }
@@ -156,6 +160,9 @@ function recordPlacement(state: StateFile, action: PlannedAction): void {
   // Adopting a pre-existing rendered dir: capture its current full-tree hash as the
   // owned baseline so later deletion safety covers the whole tree (finding 2). A
   // rendered-file (agent-def) is covered by its content hash, not a tree.
+  // Gated placements are kind "rendered", so this arm records their tree baseline
+  // too (adopt included); noops never reach recordPlacement, so the create-time
+  // record persists. Regression-pinned in gated.test.ts (adopt/no-op status clean).
   const tree = p.kind === "rendered" ? treeHashOf(abs) : undefined;
   upsertPlacement(
     state,
@@ -167,6 +174,7 @@ function recordPlacement(state: StateFile, action: PlannedAction): void {
       kind: p.kind,
       ...(p.hash ? { hash: p.hash } : {}),
       ...(tree ? { tree } : {}),
+      ...(p.gated ? { gated: true } : {}),
     },
   );
 }
@@ -243,6 +251,26 @@ function materialize(
     removeExisting(abs);
     fs.writeFileSync(abs, text);
     upsertPlacement(state, keyOf(action), source, { agent: p.agent, path: abs, kind: "rendered-file", hash: hashContent(text) });
+  } else if (p.gated) {
+    // Gated (user-invoked-only) skill tree (ADR 0011). Re-render for this agent
+    // (p.agent) into its own dir and refuse if the tree hash drifted from the reviewed
+    // hash (source or override edited in the plan→apply gap). removeExisting nukes the
+    // classifyRemoval-verified-safe old dir, so files no longer in the render are dropped.
+    // hash == tree by construction (both the full-tree hash).
+    const skill: DesiredSkill = {
+      name: action.skill,
+      source: src,
+      overrides: action.overrides ?? {},
+      gated: true,
+    };
+    const tree = renderGatedTree(skill, p.agent, p.dir, registry);
+    const treeHash = hashGatedTree(tree);
+    if (p.hash && treeHash !== p.hash) {
+      return { drift: "stale", skill: action.skill, path: abs, detail: "gated render changed since plan (source or override edited); re-run plan" };
+    }
+    removeExisting(abs);
+    writeGatedTree(tree, abs, src.path);
+    upsertPlacement(state, keyOf(action), source, { agent: p.agent, path: abs, kind: "rendered", hash: treeHash, tree: treeHashOf(abs), gated: true });
   } else if (p.derived) {
     // Derived skill: render-only SKILL.md dir (no source tree to copy).
     const hermes = p.agent === "hermes";
@@ -409,7 +437,9 @@ function summarize(
   const counts: Record<string, number> = {};
   const byType: Record<string, number> = {};
   for (const a of plan.actions) {
-    if (a.type === "prune" && !prune) {
+    // Gated-transition prunes execute even without --prune (executePlan), so they
+    // count as performed prunes, never as skipped.
+    if (a.type === "prune" && !prune && a.reason !== "gated-transition") {
       counts["prune-skipped"] = (counts["prune-skipped"] ?? 0) + 1;
     } else {
       counts[a.type] = (counts[a.type] ?? 0) + 1;

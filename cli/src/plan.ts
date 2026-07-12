@@ -8,6 +8,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { agentDefFileHash, derivedSkillHash } from "./agentdef/artifact";
 import { loadContext } from "./context";
+import { gateHonored, gatedExposureRemedy } from "./gated";
 import { type SkmEnv, expandTilde } from "./env";
 import { computeDesiredPlacements, dialectForDir } from "./placements";
 import { privacyViolation } from "./privacy";
@@ -30,6 +31,7 @@ import type {
   PlannedAction,
   Registry,
   StateFile,
+  StatePlacement,
   VerbOptions,
   VerbOutcome,
   Warning,
@@ -100,6 +102,21 @@ export function buildPlan(
       });
     }
 
+    // Gated exposure (ADR 0011): the chosen dir has readers that do not enforce the
+    // gate and are not permissive-acknowledged, so the skill stays model-invocable
+    // through them. Advisory — the placement proceeds (a hard error would make
+    // claude-code unreachable for gated skills whenever opencode is enabled).
+    if (p.gated && p.gatedExposure && p.gatedExposure.length > 0) {
+      warnings.push({
+        kind: "gated-exposure",
+        skill: dp.skill,
+        message:
+          `gated skill '${dp.skill}' at ${p.path} is readable by no-gate agent(s) ` +
+          `${p.gatedExposure.join(", ")}, which ignore disable-model-invocation; ` +
+          gatedExposureRemedy(registry, p.gatedExposure),
+      });
+    }
+
     // Privacy guard: refuse a private placement inside a disallowed git worktree.
     if (dp.source.visibility === "private") {
       const reason = privacyViolation(config, p.path);
@@ -137,10 +154,10 @@ export function buildPlan(
     if (p.channel === "tprompt") {
       // Foreign stem collision → reported above, skip this placement only.
       if (!tpromptSkip.has(path.resolve(p.path))) diffTpromptFile(env, dp, state, actions, warnings, foreign);
-    } else if (p.artifactType === "composed-skill") {
-      // MUST precede the `rendered` branch: a composed placement's hash is the full
-      // tree hash, so diffRendered's SKILL.md-sha compare would false-positive.
-      diffComposed(env, dp, state, actions, warnings, foreign);
+    } else if (p.artifactType === "composed-skill" || p.gated) {
+      // MUST precede the `rendered` branch: a composed OR gated placement's hash is the
+      // full tree hash, so diffRendered's SKILL.md-sha compare would false-positive.
+      diffTreeRendered(env, dp, state, actions, warnings, foreign);
     } else if (p.artifactType === "agent-def") {
       diffAgentDefFile(env, dp, state, actions, warnings, foreign);
     } else if (p.kind === "rendered") {
@@ -150,7 +167,11 @@ export function buildPlan(
     }
   }
 
-  const requiresPrune = collectPrunes(env, desiredPaths, state, actions, solved.tprompt.available);
+  // Names of skills that are gated in the CURRENT desired state: their stale
+  // placements (e.g. the old shared-root symlink after an ungated→gated transition)
+  // become required removals, not optional prunes — see collectPrunes.
+  const gatedSkillNames = new Set(desired.skills.filter((s) => s.gated).map((s) => s.name));
+  const requiresPrune = collectPrunes(env, registry, desiredPaths, state, actions, solved.tprompt.available, gatedSkillNames);
   const planHash = planHashOf(desired.hash, actions, requiresPrune);
 
   return {
@@ -208,6 +229,12 @@ export function planHashOf(
           // Export channel: omitting it would let a reviewed --plan flip a tprompt
           // prompt to a harness placement (or vice versa) at the same path.
           channel: a.placement.channel ?? null,
+          // Gated marker: omitting it would let a reviewed --plan flip a gated tree
+          // render (tree-hash bound) to a plain symlink/rendered skill, un-gating it.
+          gated: a.placement.gated ?? null,
+          // Exposure set covered like bleed: a reviewed plan's advisory context must
+          // not be silently strippable while still passing integrity.
+          gatedExposure: a.placement.gatedExposure ?? null,
         },
         // Prune actions carry an empty source path → normalize to null.
         source: a.source
@@ -218,6 +245,10 @@ export function planHashOf(
             }
           : null,
         overrides: a.overrides ? sortedOverrides(a.overrides) : null,
+        // reason "gated-transition" makes a prune execute WITHOUT --prune; omitting it
+        // would let a tampered --plan file flip an optional prune into a flag-bypassing
+        // deletion while passing integrity.
+        reason: a.reason ?? null,
       }),
     )
     .sort((x, y) => {
@@ -292,6 +323,13 @@ function diffSymlink(
       if (entry.kind === "symlink") {
         // Our owned symlink was re-pointed; unlinking a link loses no content → repair.
         actions.push(baseAction(dp, "create", { ...p }));
+      } else if (ownedUnmodifiedGatedTree(owner.placement, p.path)) {
+        // Gated→ungated transition (ADR 0011): the source dropped
+        // disable-model-invocation, so a symlink is now desired where skm's OWN
+        // unmodified gated tree sits (state records gated + a matching full-tree
+        // hash). Replacing skm's render loses nothing → repair; classifyRemoval
+        // re-verifies the tree at write time.
+        actions.push(baseAction(dp, "create", { ...p }));
       } else {
         // A real dir/file replaced our symlink → user content. Never clobber (DEL-1).
         foreign.push({
@@ -340,7 +378,22 @@ function diffRendered(
   if (entry.kind === "dir") {
     const diskHash = entry.sha256OfSkillMd;
     if (owner) {
-      if (diskHash === owner.placement.hash) {
+      if (owner.placement.gated) {
+        // Gated→ungated transition (ADR 0011): the state placement was recorded gated
+        // (its hash is a FULL-TREE hash), but the desired render no longer is (else
+        // diffTreeRendered would have run) — so the SKILL.md-sha compare below would
+        // false-positive as hand-edited. skm's own unmodified tree → update (re-render
+        // ungated); a genuinely diverged tree keeps the hand-edit warning.
+        if (ownedUnmodifiedGatedTree(owner.placement, p.path)) {
+          actions.push(baseAction(dp, "update", rendered));
+        } else {
+          warnings.push({
+            kind: "modified",
+            skill: dp.skill,
+            message: `gated skill '${dp.skill}' at ${p.path} was hand-edited; not overwritten (remove it and re-apply to restore skm's render)`,
+          });
+        }
+      } else if (diskHash === owner.placement.hash) {
         actions.push(baseAction(dp, owner.placement.hash === expectedHash ? "noop" : "update", rendered));
       } else {
         // Native rendered skills are repaired by `doctor --fix`; a derived skill is
@@ -372,16 +425,17 @@ function diffRendered(
 }
 
 /**
- * Diff one composed-skill rendered tree (ADR 0010). The placement `hash` already IS
- * the expected in-memory full-tree hash (set at placement time); disk state is the
- * on-disk `treeHashOf`. Mirrors diffRendered but keyed on the tree hash: absent →
- * create; owned + disk matches recorded tree + matches expected → noop; owned + disk
- * matches recorded but expected differs (source edit) → update; owned + disk diverged
- * from the recorded tree (hand-edit) → warn + NO action (remedy: remove-then-re-apply,
- * because a composed placement is doctor-non-fixable); unowned + disk matches expected
- * → adopt; anything else → foreign.
+ * Diff one tree-hashed rendered placement — a composed-skill consumer tree (ADR 0010)
+ * or a gated-skill tree (ADR 0011). The placement `hash` already IS the expected
+ * in-memory full-tree hash (set at placement time); disk state is the on-disk
+ * `treeHashOf`. Mirrors diffRendered but keyed on the tree hash: absent → create;
+ * owned + disk matches recorded tree + matches expected → noop; owned + disk matches
+ * recorded but expected differs (source edit) → update; owned + disk diverged from the
+ * recorded tree (hand-edit) → warn + NO action (remedy: remove-then-re-apply, both
+ * artifact kinds are doctor-non-fixable); unowned + disk matches expected → adopt;
+ * anything else → foreign.
  */
-function diffComposed(
+function diffTreeRendered(
   env: SkmEnv,
   dp: DesiredPlacement,
   state: StateFile,
@@ -390,6 +444,7 @@ function diffComposed(
   foreign: DriftFinding[],
 ): void {
   const p = dp.placement;
+  const noun = p.gated ? "gated skill" : "composed skill";
   const expectedHash = p.hash!; // the full rendered-tree hash, computed at placement time
   const owner = findOwner(state, p.path);
   const entry = scanEntry(env, p.path);
@@ -403,14 +458,22 @@ function diffComposed(
     if (owner) {
       const recordedTree = owner.placement.tree;
       if (recordedTree && diskTree === recordedTree) {
-        actions.push(baseAction(dp, recordedTree === expectedHash ? "noop" : "update", p));
+        // Upgrade path (ADR 0011): a pre-gated skm may have applied this IDENTICAL
+        // tree as a non-gated render — for frontmatter-gate first-party agents no
+        // companion differentiates the bytes — leaving owner.placement.gated unset.
+        // A noop never calls recordPlacement, so the record would never converge:
+        // doctor's live-exposure (keyed on sp.gated) stays silent and status uses
+        // the SKILL.md-sha arm. Force an update to refresh the record when the
+        // desired placement is gated but the owned record is not.
+        const recordStale = p.gated === true && owner.placement.gated !== true;
+        actions.push(baseAction(dp, recordedTree === expectedHash && !recordStale ? "noop" : "update", p));
       } else {
-        // Disk diverged from skm's recorded render → hand-edited. Composed placements
-        // are non-fixable, so the remedy is remove-then-re-apply (plain apply won't).
+        // Disk diverged from skm's recorded render → hand-edited. Tree-rendered
+        // placements are non-fixable, so the remedy is remove-then-re-apply.
         warnings.push({
           kind: "modified",
           skill: dp.skill,
-          message: `composed skill '${dp.skill}' at ${p.path} was hand-edited; not overwritten (remove it and re-apply to restore skm's render)`,
+          message: `${noun} '${dp.skill}' at ${p.path} was hand-edited; not overwritten (remove it and re-apply to restore skm's render)`,
         });
       }
     } else if (diskTree === expectedHash) {
@@ -420,7 +483,7 @@ function diffComposed(
     }
     return;
   }
-  // A symlink/file sits where a composed rendered dir belongs.
+  // A symlink/file sits where a rendered tree belongs.
   if (owner && entry.kind === "symlink") {
     actions.push(baseAction(dp, "create", p)); // unlinking a link loses nothing → re-render
   } else {
@@ -534,13 +597,31 @@ function diffTpromptFile(
   }
 }
 
-/** State-owned placements no longer desired become prune actions (hermes exempt). */
+/**
+ * State-owned placements no longer desired become prune actions (hermes exempt).
+ *
+ * Gated exception (ADR 0011): a stale placement of a skill that is gated in the
+ * CURRENT desired state is a required removal, not an optional cleanup, unless
+ * the placement's agent itself enforces the gate. `sp.gated` records how the
+ * tree was RENDERED, not whether it is enforced where it sits — a permissive
+ * placement whose opt-in was revoked (or whose agent's registry gate flipped to
+ * none) is still model-invocable and must go. So: an old shared-root symlink, a
+ * pre-gate render, or a gated tree in a no-gate agent's dir → required (reason
+ * "gated-transition", executePlan runs them WITHOUT --prune, no requiresPrune);
+ * a gated tree in a gate-honoring agent's dir (e.g. orphaned by narrowing scope)
+ * still enforces its gate → ordinary --prune cleanup. The deletion invariant is
+ * unchanged: only state-owned paths, still gated by classifyRemoval at execute
+ * time. Hermes stays add-only exempt even here (the invariant wins); doctor's
+ * gated-leak scan flags any leftover there.
+ */
 function collectPrunes(
   env: SkmEnv,
+  registry: Registry,
   desiredPaths: Set<string>,
   state: StateFile,
   actions: PlannedAction[],
   tpromptAvailable: boolean,
+  gatedSkillNames: Set<string>,
 ): boolean {
   let requiresPrune = false;
   for (const artifact of Object.values(state.artifacts)) {
@@ -560,13 +641,50 @@ function collectPrunes(
         kind: sp.kind,
         hash: sp.hash,
         artifactType: artifact.type,
+        ...(sp.gated ? { gated: true } : {}),
         ...(sp.agent === "tprompt" ? { channel: "tprompt" as const } : {}),
       };
-      actions.push({ type: "prune", skill: artifact.name, placement, source: { root: artifact.source.root, visibility: artifact.source.visibility, path: "" } });
-      requiresPrune = true;
+      // tprompt exports are a prompt channel, not a model-invocable skill placement —
+      // no exposure, so they keep the ordinary --prune opt-in.
+      const enforcedInPlace =
+        sp.gated === true && gateHonored(registry.agents[sp.agent]?.skillInvocation?.gate);
+      const required =
+        artifact.type === "skill" &&
+        gatedSkillNames.has(artifact.name) &&
+        !enforcedInPlace &&
+        sp.agent !== "tprompt";
+      actions.push({
+        type: "prune",
+        skill: artifact.name,
+        placement,
+        source: { root: artifact.source.root, visibility: artifact.source.visibility, path: "" },
+        ...(required ? { reason: "gated-transition" } : {}),
+      });
+      if (!required) requiresPrune = true;
     }
   }
   return requiresPrune;
+}
+
+/**
+ * True when what sits at `abs` is skm's OWN unmodified gated render: the state
+ * placement was recorded gated with a full-tree hash, and the on-disk tree still
+ * hashes to it. Such a dir is safe to replace on a gated→ungated transition — it
+ * contains nothing skm did not write (mirrors classifyRemoval's rendered-dir rule,
+ * which re-verifies at write time).
+ */
+function ownedUnmodifiedGatedTree(sp: StatePlacement, abs: string): boolean {
+  if (sp.gated !== true || sp.kind !== "rendered" || sp.tree === undefined) return false;
+  // A non-directory at the recorded path (e.g. the tree replaced by a regular file)
+  // is user content, not our render — and treeHashOf would throw traversing it.
+  let stat: fs.Stats;
+  try {
+    stat = fs.lstatSync(abs);
+  } catch {
+    return false;
+  }
+  if (!stat.isDirectory()) return false;
+  return treeHashOf(abs) === sp.tree;
 }
 
 function describeForeign(env: SkmEnv, targetPath: string): string {

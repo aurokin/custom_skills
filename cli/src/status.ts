@@ -90,26 +90,40 @@ export function computeDrift(
         continue;
       }
 
-      // Composed rendered tree (ADR 0010). MUST precede the `rendered` branch below:
-      // a composed placement's hash is the full-tree hash, so the SKILL.md-sha compare
-      // there would false-positive. Compare disk treeHashOf to the recorded tree, then
-      // to the currently-desired tree hash (dp.placement.hash) for source edits.
-      if (artifact.type === "composed-skill") {
+      // Tree-hashed rendered placement: a composed-skill consumer tree (ADR 0010) or a
+      // gated-skill tree (ADR 0011). MUST precede the `rendered` branch below: its hash
+      // is the full-tree hash, so the SKILL.md-sha compare there would false-positive.
+      // Compare disk treeHashOf to the recorded tree, then to the currently-desired tree
+      // hash (dp.placement.hash) for source edits. Gatedness is per-placement (a gated
+      // skill's artifact type stays "skill"), so key off sp.gated too.
+      if (artifact.type === "composed-skill" || sp.gated) {
+        const noun = sp.gated ? "gated skill" : "composed skill";
         if (entry.kind !== "dir") {
-          findings.push({ drift: "modified", skill, path: sp.path, detail: "composed tree replaced on disk" });
+          findings.push({ drift: "modified", skill, path: sp.path, detail: `${noun} tree replaced on disk` });
           continue;
         }
         const diskTree = treeHashOf(abs);
         if (diskTree !== sp.tree) {
-          findings.push({ drift: "modified", skill, path: sp.path, detail: "composed skill hand-edited" });
+          findings.push({ drift: "modified", skill, path: sp.path, detail: `${noun} hand-edited` });
           continue;
         }
         if (!dp) {
           findings.push({ drift: "stale", skill, path: sp.path, detail: "owned placement no longer desired" });
           continue;
         }
+        // Gated→ungated transition (ADR 0011): the desired placement is no longer
+        // gated, so its hash is NOT a tree hash (unset for a plain render — plan
+        // computes that itself; a desired symlink was already caught by the
+        // kind-changed check above). The recorded tree can never legitimately match
+        // the desired render, and plan unconditionally emits update here — the hash
+        // compare below would read `undefined` as clean and break the three-way
+        // contract (status silent while plan has work).
+        if (sp.gated && !dp.placement.gated) {
+          findings.push({ drift: "stale", skill, path: sp.path, detail: "desired render is no longer gated; re-run plan" });
+          continue;
+        }
         if (dp.placement.hash !== undefined && dp.placement.hash !== sp.tree) {
-          findings.push({ drift: "stale", skill, path: sp.path, detail: "desired composed render changed since apply; re-run plan" });
+          findings.push({ drift: "stale", skill, path: sp.path, detail: `desired ${noun} render changed since apply; re-run plan` });
         }
         continue;
       }
@@ -154,6 +168,15 @@ export function computeDrift(
         }
         if (!dp) {
           findings.push({ drift: "stale", skill, path: sp.path, detail: "owned placement no longer desired" });
+          continue;
+        }
+        // Ungated→gated record upgrade (ADR 0011): the desired placement is gated but
+        // the owned record predates gating (a pre-gated skm rendered IDENTICAL bytes
+        // for frontmatter-gate first-party agents — no companion differentiates them).
+        // plan emits update to refresh the record; the renderedHash compare below
+        // would read the identical bytes as clean and break the three-way contract.
+        if (dp.placement.gated && !sp.gated) {
+          findings.push({ drift: "stale", skill, path: sp.path, detail: "desired render is now gated; re-run plan" });
           continue;
         }
         // Disk matches state — but does state still match what plan WOULD render? A
