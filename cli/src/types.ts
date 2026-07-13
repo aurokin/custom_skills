@@ -305,6 +305,12 @@ export interface ComposedDimension {
   title?: string;
   when?: string;
   candidates: ComposedCandidate[];
+  /**
+   * Opt-out of the auto-appended self-note ("offload for parallelism/quota…")
+   * when the rank-1 candidate is the consumer itself. Only legal value is
+   * false — for skills whose routes are not offloading (e.g. consult).
+   */
+  selfNote?: false;
 }
 
 /** A declared consumer entry in skill.yaml. */

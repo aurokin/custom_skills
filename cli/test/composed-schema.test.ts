@@ -104,6 +104,16 @@ describe("validation matrix", () => {
     expect(() => loadComposedSkill(baseInput())).not.toThrow();
   });
 
+  test("dimension selfNote: false parses; any other value is rejected", () => {
+    const { skill } = loadComposedSkill(withYaml((y) => (y.dimensions[0].selfNote = false)));
+    expect(skill.dimensions[0]!.selfNote).toBe(false);
+    expect(skill.dimensions[1]!.selfNote).toBeUndefined();
+    for (const bad of [true, "false", 0]) {
+      const input = withYaml((y) => (y.dimensions[0].selfNote = bad));
+      expect(() => loadComposedSkill(input)).toThrow(/only legal value is false/);
+    }
+  });
+
   test("empty candidate list is rejected", () => {
     const input = withYaml((y) => {
       y.dimensions[1].candidates = [];
