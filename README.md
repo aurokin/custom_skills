@@ -225,6 +225,8 @@ Current project families:
 - `expo`
 - `convex`
 - `mattpocock-teaching`
+- `react`
+- `security`
 
 ### Notable catalog changes
 
