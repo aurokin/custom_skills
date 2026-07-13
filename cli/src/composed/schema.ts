@@ -229,13 +229,21 @@ function parseDimensions(raw: Mapping, path: string): ComposedDimension[] {
     if (!isMapping(entry)) {
       throw new ComposedSkillError(`Expected dimension #${i + 1} to be a mapping in ${path}`);
     }
-    rejectUnknownKeys(entry, ["key", "title", "when", "candidates"], `Unknown keys in dimension #${i + 1} in ${path}`);
+    rejectUnknownKeys(entry, ["key", "title", "when", "candidates", "selfNote"], `Unknown keys in dimension #${i + 1} in ${path}`);
     const key = requiredStr(entry, "key", `${path} (dimension #${i + 1})`);
     const dim: ComposedDimension = { key, candidates: parseCandidates(entry, key, path) };
     const title = optionalStr(entry, "title", `${path} (dimension '${key}')`);
     if (title !== undefined) dim.title = title;
     const when = optionalStr(entry, "when", `${path} (dimension '${key}')`);
     if (when !== undefined) dim.when = when;
+    if (entry.selfNote !== undefined) {
+      if (entry.selfNote !== false) {
+        throw new ComposedSkillError(
+          `Dimension '${key}' has 'selfNote: ${String(entry.selfNote)}' — the only legal value is false (omit the key to keep the default note) in ${path}`,
+        );
+      }
+      dim.selfNote = false;
+    }
     return dim;
   });
 }

@@ -157,7 +157,7 @@ function buildRoutingTable(
 
     const notes: string[] = [];
     if (primary.note) notes.push(primary.note);
-    if (dim.candidates[0]!.provider === selfId) notes.push(SELF_NOTE);
+    if (dim.selfNote !== false && dim.candidates[0]!.provider === selfId) notes.push(SELF_NOTE);
 
     const dimension = tableCell(dim.title ?? dim.key);
     const when = tableCell(dim.when ?? "");

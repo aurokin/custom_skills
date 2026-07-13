@@ -176,6 +176,27 @@ describe("renderComposedSkill semantics", () => {
 // Tree-hash binding: in-memory hash === treeHashOf(written dir)
 // ─────────────────────────────────────────────────────────────────────────────
 
+describe("selfNote opt-out", () => {
+  test("selfNote: false suppresses the self-was-rank-1 note; default keeps it", () => {
+    const skill = loadFixture("composed-kitchen-sink");
+    const noteRe = /equally strong here/;
+    for (const consumer of ["claude-code", "codex"]) {
+      const before = renderComposedSkill(skill, consumer, registry)["SKILL.md"]!;
+      const muted = {
+        ...skill,
+        dimensions: skill.dimensions.map((d) => ({ ...d, selfNote: false as const })),
+      };
+      const after = renderComposedSkill(muted, consumer, registry)["SKILL.md"]!;
+      if (noteRe.test(before)) {
+        expect(after).not.toMatch(noteRe);
+        expect(after).not.toBe(before);
+      } else {
+        expect(after).toBe(before);
+      }
+    }
+  });
+});
+
 describe("tree-hash binding", () => {
   test("composedTreeHash equals treeHashOf over the written directory", () => {
     const skill = loadFixture("composed-kitchen-sink");
