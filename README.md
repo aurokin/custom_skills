@@ -50,8 +50,9 @@ It will:
 - update existing global skills
 - add any missing curated global skills
 - audit selected upstream repos for coverage drift
-- link local repo skills into both global skill directories
 - clean up broken symlinks in those global directories
+
+Local repo skills are placed separately by `skm` (see below).
 
 Use it when you want to update your personal baseline skill environment.
 
@@ -186,8 +187,9 @@ symlinks into shared roots for unscoped skills, rendered per-agent trees for
 gated ones, ownership-tracked and prunable:
 
 ```bash
-cd cli && bun src/cli.ts plan   # preview
-cd cli && bun src/cli.ts apply  # place
+cd cli
+bun src/cli.ts plan   # preview
+bun src/cli.ts apply  # place
 ```
 
 The former `./link-skills.sh` was retired once skm reached placement parity
