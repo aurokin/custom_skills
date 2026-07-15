@@ -59,6 +59,7 @@ skm apply   [--json] [--plan <f>] [--prune] [--yes]
 skm status  [--json]                     drift: missing|stale|modified|foreign|unsafe
 skm doctor  [--json] [--fix]             leaks, broken links, deny-guarantee checks
 skm explain <skill> [--json]             source, scoping, placements, bleed
+skm review  [--json] [--out <path>]      HTML review console (ADR 0013); --json emits the model
 skm root    add|list|remove [<path>]     edit machine config roots
 ```
 

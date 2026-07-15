@@ -10,7 +10,7 @@ import { loadContext } from "../src/context";
 import { buildReviewModel, diffCellFiles } from "../src/review/model";
 import type { VerbOptions } from "../src/types";
 import { stringify } from "yaml";
-import { type Sandbox, makeAgentDef, makeComposed, makeRoot, makeSandbox, makeSkill, writeMachineConfig } from "./util";
+import { type Sandbox, makeAgentDef, makeComposed, makeProviderPool, makeRoot, makeSandbox, makeSkill, writeMachineConfig } from "./util";
 
 function providerText(name: string, cli: string): string {
   return `---\n${stringify({ name, cli, models: { m1: { default: true } } })}---\n\n# ${name}\n\nAnti-recursion: {{provider_clis}}.\n`;
@@ -297,6 +297,21 @@ describe("review model", () => {
     const entry = shared?.entries.find((e) => e.name === "plain-skill");
     expect(entry?.doc).toBeDefined();
     expect(model.docs[entry!.doc!]?.skill).toContain("plain body");
+  });
+
+  test("shared provider pools appear as source-only units per root", async () => {
+    const root = makeRoot(sb, "public");
+    makeSkill(root.path, "plain-skill");
+    makeProviderPool(root.path, { claude: providerText("claude", "claude") });
+    writeMachineConfig(sb, { version: 1, roots: [root], agents: ["claude-code"] });
+    await runApply(sb.env, APPLY_OPTS);
+
+    const model = buildReviewModel(sb.env, loadContext(sb.env));
+    const pool = model.units.find((u) => u.id === "pool-public");
+    expect(pool?.group).toBe("Composed skills");
+    expect(pool?.badges).toContain("pool");
+    expect(pool?.variants[0]?.files.some((f) => f.path === "claude.md")).toBe(true);
+    expect(pool?.placements).toEqual([]);
   });
 
   test("model is stable across runs (modulo clock)", async () => {

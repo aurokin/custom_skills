@@ -9,6 +9,7 @@ import type { SkmContext } from "../context";
 import { type SkmEnv, expandTilde } from "../env";
 import { computeDesiredPlacements, type DesiredPlacement } from "../placements";
 import { renderComposedSkill, type RenderedComposedTree } from "../composed/render";
+import { PROVIDER_POOL_DIR } from "../composed/source";
 import { lineDiff } from "./linediff";
 import { computeDrift } from "../status";
 import type { DriftClass, Posture } from "../types";
@@ -342,6 +343,22 @@ export function buildReviewModel(env: SkmEnv, ctx: SkmContext): ReviewModel {
       ],
       matrix: { consumers: matrixConsumers, postures, sourcePosture: skill.posture, cells },
       placements: joinedPlacements,
+    });
+  }
+
+  // ── Shared provider pools (ADR 0012): per-root, source-only review units ──
+  for (const root of config.roots) {
+    const poolDir = path.join(root.path, "composed", PROVIDER_POOL_DIR);
+    if (!isDir(poolDir)) continue;
+    const files = listTree(poolDir);
+    if (!files.length) continue;
+    units.push({
+      id: `pool-${root.name}`,
+      group: "Composed skills",
+      name: `${PROVIDER_POOL_DIR} (shared pool, ${root.name})`,
+      badges: [root.visibility, "pool"],
+      variants: [{ key: "source", label: "Source", root: tilde(env, poolDir), files }],
+      placements: [],
     });
   }
 

@@ -1,6 +1,6 @@
 # ADR 0013: `skm review` — the skill-surface review console as a first-class verb
 
-- Status: proposed
+- Status: accepted (implemented; phases 1–4 shipped)
 - Date: 2026-07-14
 - Depends on: [ADR 0006](0006-plan-apply-ownership-state.md) (state),
   [ADR 0009](0009-dialect-document-emitter-rendering.md) (rendering),
