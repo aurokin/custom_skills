@@ -14,6 +14,7 @@ import { runPlan } from "./plan";
 import { runRoot } from "./root";
 import { runStatus } from "./status";
 import { runReview } from "./review/verb";
+import { runDeploy } from "./deploy/verb";
 
 const VERBS: Record<string, VerbHandler> = {
   plan: runPlan,
@@ -24,6 +25,7 @@ const VERBS: Record<string, VerbHandler> = {
   explain: runExplain,
   adopt: runAdopt,
   root: runRoot,
+  deploy: runDeploy,
 };
 
 interface ParsedInvocation {
@@ -40,6 +42,11 @@ export function parseArgs(argv: string[]): ParsedInvocation {
   let planFile: string | undefined;
   let agentsHome: string | undefined;
   let out: string | undefined;
+  const families: string[] = [];
+  let allFamilies = false;
+  let agentsList: string | undefined;
+  let dryRun = false;
+  let listFamilies = false;
   const args: string[] = [];
 
   for (let i = 0; i < argv.length; i++) {
@@ -89,12 +96,41 @@ export function parseArgs(argv: string[]): ParsedInvocation {
       const value = a.slice("--out=".length);
       if (value === "") throw new UsageError("--out requires a file path");
       out = value;
+    } else if (verb === "deploy" && a === "--family") {
+      const value = argv[++i];
+      if (value === undefined || value.startsWith("-")) {
+        throw new UsageError("--family requires a family name");
+      }
+      families.push(value);
+    } else if (verb === "deploy" && a.startsWith("--family=")) {
+      const value = a.slice("--family=".length);
+      if (value === "") throw new UsageError("--family requires a family name");
+      families.push(value);
+    } else if (verb === "deploy" && a === "--all-families") allFamilies = true;
+    else if (verb === "deploy" && a === "--list-families") listFamilies = true;
+    else if (verb === "deploy" && a === "--dry-run") dryRun = true;
+    else if (verb === "deploy" && a === "--agents") {
+      const value = argv[++i];
+      if (value === undefined || value.startsWith("-")) {
+        throw new UsageError("--agents requires an agent list");
+      }
+      agentsList = value;
+    } else if (verb === "deploy" && a.startsWith("--agents=")) {
+      const value = a.slice("--agents=".length);
+      if (value === "") throw new UsageError("--agents requires an agent list");
+      agentsList = value;
     }
+    // Deploy-only flags are rejected on every other verb: falling through to the
+    // "unknown flag" guard keeps `skm apply --dry-run` an error, never a silent
+    // pass-through into the mutating path.
     else if (a.startsWith("-")) throw new UsageError(`unknown flag: ${a}`);
     else args.push(a);
   }
 
-  return { verb, opts: { json, prune, yes, planFile, fix, agentsHome, out, args } };
+  return {
+    verb,
+    opts: { json, prune, yes, planFile, fix, agentsHome, out, families, allFamilies, agentsList, dryRun, listFamilies, args },
+  };
 }
 
 const USAGE = `skm — skills manager (local skills placement engine)
@@ -108,6 +144,8 @@ Usage:
   skm explain <skill> [--json]             source, scoping, placements, bleed
   skm adopt   custom-agents [--agents-home <dir>]  take ownership of manifest agent-def files
   skm root    add|list|remove [<path>]     edit machine config roots
+  skm deploy  <dir> [--family <n>]… [--all-families] [--agents "<a b>"] [--dry-run] [--yes] [--list-families]
+                                           copy curated skill families into a project (ADR 0014)
 
 Exit codes: 0 clean · 1 error · 2 changes pending / drift`;
 

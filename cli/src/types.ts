@@ -657,7 +657,17 @@ export interface VerbOptions {
   agentsHome?: string;
   /** `review --out <path>`: explicit HTML output path (privacy-guarded). */
   out?: string;
-  /** Positional args (e.g. `explain <skill>`, `root add <path>`). */
+  /** `deploy --family <name>` (repeatable): selected skill families. */
+  families?: string[];
+  /** `deploy --all-families`: deploy every configured family. */
+  allFamilies?: boolean;
+  /** `deploy --agents "<a b>"`: space-separated agent list for the copy installs. */
+  agentsList?: string;
+  /** `deploy --dry-run`: print the resolved install plan without executing. */
+  dryRun?: boolean;
+  /** `deploy --list-families`: print available families and exit. */
+  listFamilies?: boolean;
+  /** Positional args (e.g. `explain <skill>`, `root add <path>`, `deploy <dir>`). */
   args: string[];
 }
 

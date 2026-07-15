@@ -33,7 +33,7 @@ export interface CatalogSpecs {
 
 // Mirrors lib/catalog.sh validate_spec_line: the repo portion may include a
 // GitHub subdirectory after owner/name, e.g. cursor/plugins/thermos@thermos.
-const SPEC_LINE = /^[A-Za-z0-9_.-]+(\/[A-Za-z0-9_.-]+)+(@[A-Za-z0-9_.-]+)?$/;
+export const SPEC_LINE = /^[A-Za-z0-9_.-]+(\/[A-Za-z0-9_.-]+)+(@[A-Za-z0-9_.-]+)?$/;
 
 function parseSpecsFile(file: string, root: string): CatalogSpec[] {
   if (!fs.existsSync(file)) return [];
