@@ -46,12 +46,13 @@ In scope:
 
 Out of scope for v1 (unchanged; owned elsewhere):
 
-- **Upstream skills.** The vercel `skills` CLI and `install-repro-skills.sh`
-  remain authoritative for upstream, unscoped installs into `~/.agents/skills`.
-  skm treats anything it does not own as **foreign** — reported, never touched.
 - No upstream vendoring, no TUI.
 
-Now in scope (ADR 0014): **project-family deploys** via `skm deploy` (see below).
+Now in scope (ADR 0014): **project-family deploys** via `skm deploy` and
+**unscoped upstream sync** via `skm upstream sync` (see below). The vercel
+`skills` CLI stays the fetch/place engine behind both verbs; skm treats any
+upstream install it does not own as **foreign** — reported, never touched,
+never adopted into `state.json`.
 
 ## Verbs
 
@@ -64,6 +65,7 @@ skm explain <skill> [--json]             source, scoping, placements, bleed
 skm review  [--json] [--out <path>]      HTML review console (ADR 0013); --json emits the model
 skm root    add|list|remove [<path>]     edit machine config roots
 skm deploy  <dir> [--family <n>]… [--all-families] [--agents "<a b>"] [--dry-run] [--yes] [--list-families]
+skm upstream sync                        sync global upstream skills (remove stale / update / add missing)
 ```
 
 `skm deploy` (ADR 0014 decision 3) copies curated / custom skill **families**
@@ -76,6 +78,21 @@ coverage audit, and shells out to the `skills` CLI per repo batch. The bash
 interactive prompt mode is dropped (`--list-families` + flags are the human path).
 Deployed copies are **not skm-owned**: `deploy` never reads or writes `state.json`
 (ADR 0014 ownership boundary), so it coexists with `plan`/`apply`.
+
+`skm upstream sync` (ADR 0014 decision 4) is the cutover port of
+`install-repro-skills.sh`: it diffs the desired set in
+`catalog/global-specs.txt` (+ `.skills.local.json` `globalSpecs` /
+`excludeGlobalSpecs` / `preserveGlobalSkillNames`, validated) against
+`skills list -g --json` and drives the `skills` CLI through the same three
+phases — remove stale, update existing, add missing. Behavior preserved
+verbatim: Hermes add-only scoping (stale removal narrowed with `-a` to
+non-Hermes agents — never deletes from `~/.hermes/skills`) plus the
+owned-target broken-symlink sweep; the OpenClaw
+`--dangerously-accept-openclaw-risks` flag; diffwarden `--full-depth`;
+preserve-lists; the full-coverage repo audit; and the `$SKILLS_AGENTS` /
+`$SKILLS_BIN` / `$SKILLS_AUDIT_REPO_COVERAGE` / `$UPSTREAM_COVERAGE_FILE`
+env semantics. Sync is latest-wins (no pinning); upstream installs are never
+adopted into `state.json`.
 
 Conventions: `plan` never mutates. `apply --plan <file>` runs exactly the
 reviewed plan (refused if the desired-state hash changed). Every verb supports
@@ -114,15 +131,19 @@ reviewed plan (refused if the desired-state hash changed). Every verb supports
 
 skm owns local-skill placement outright: `link-skills.sh` was retired at
 placement parity (gate awareness, hermes add-only, stale-link pruning are
-covered by `cli/test`). `install-repro-skills.sh` and `lib/agents.sh` remain
-**authoritative** for upstream-skill sync until it is absorbed as `skm upstream
-sync` (ADR 0014 decision 4). `skm deploy` now ports `deploy-project-skills.sh`
-on the copy path (ADR 0014 decision 3); the bash script is **kept in place** for
-one post-cutover soak period (deletion + the bash-test → golden conversion are
-deferred to phase 4's parity gate), and `test/deploy-parity.test.ts` diffs the
-two paths' resolved install plans. skm never deletes what it does not own — and
-`deploy` writes nothing to `state.json` — so it coexists safely with the
-remaining bash path.
+covered by `cli/test`). ADR 0014 completes the migration: `skm deploy` ports
+`deploy-project-skills.sh` on the copy path (decision 3;
+`test/deploy-parity.test.ts` diffs the two paths' resolved install plans) and
+**`skm upstream sync` is now the cutover path** for unscoped upstream sync
+(decision 4; `test/upstream-sync-parity.test.ts` asserts the destructive
+edges — Hermes add-only narrowing and sweep, OpenClaw/diffwarden flags,
+preserve-lists, excludes — against the bash script on identical fixtures).
+`install-repro-skills.sh`, `deploy-project-skills.sh`, and `lib/*.sh` are
+**in soak**: kept in place for one post-cutover soak period, unedited;
+deletion (+ bash-test → golden conversion and root doc-surface
+reconciliation) is a separate final commit with the parity evidence. skm
+never deletes what it does not own — and neither new verb touches
+`state.json` — so it coexists safely with the bash path throughout the soak.
 
 ## Development
 

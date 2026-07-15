@@ -15,22 +15,24 @@ import * as path from "node:path";
 import { SPEC_LINE } from "../catalog-specs";
 import { type CuratedFamilyLookup, type LocalSkillsConfig, loadLocalSkillsConfig } from "./local-config";
 
-// ── spec helpers (ports of lib/catalog.sh spec_has_explicit_skill / spec_repo / spec_skill) ──
+// ── spec helpers (ports of lib/catalog.sh spec_has_explicit_skill / spec_repo / spec_skill).
+// Exported: the upstream-sync port (src/upstream/) shares them, exactly as the two bash
+// scripts share lib/catalog.sh. ──
 
-function specHasExplicitSkill(spec: string): boolean {
+export function specHasExplicitSkill(spec: string): boolean {
   return spec.includes("@");
 }
-function specRepo(spec: string): string {
+export function specRepo(spec: string): string {
   const at = spec.lastIndexOf("@");
   return at === -1 ? spec : spec.slice(0, at);
 }
-function specSkill(spec: string): string {
+export function specSkill(spec: string): string {
   const at = spec.lastIndexOf("@");
   return at === -1 ? "" : spec.slice(at + 1);
 }
 
 /** dedupe_array: drop empties + later duplicates, preserving first-seen order. */
-function dedupe(values: string[]): string[] {
+export function dedupe(values: string[]): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const v of values) {
@@ -177,7 +179,7 @@ export class UnknownFamilyError extends Error {
 export type UpstreamEnumerator = (repo: string) => string[];
 
 /** expand_full_repo_specs: whole-repo specs → one `<repo>@<skill>` per enumerated skill. */
-function expandFullRepoSpecs(specs: string[], enumerate: UpstreamEnumerator): string[] {
+export function expandFullRepoSpecs(specs: string[], enumerate: UpstreamEnumerator): string[] {
   const out: string[] = [];
   for (const spec of specs) {
     if (specHasExplicitSkill(spec)) {
@@ -191,7 +193,7 @@ function expandFullRepoSpecs(specs: string[], enumerate: UpstreamEnumerator): st
 }
 
 /** resolve_excluded_specs: expand whole-repo excludes to the available specs of that repo. */
-function resolveExcludedSpecs(excludes: string[], available: string[]): string[] {
+export function resolveExcludedSpecs(excludes: string[], available: string[]): string[] {
   const availableByRepo = new Map<string, string[]>();
   for (const spec of available) {
     const repo = specRepo(spec);
@@ -214,7 +216,7 @@ function resolveExcludedSpecs(excludes: string[], available: string[]): string[]
 }
 
 /** filter_excluded_specs: specs minus the resolved-excluded set. */
-function filterExcludedSpecs(specs: string[], excludes: string[]): string[] {
+export function filterExcludedSpecs(specs: string[], excludes: string[]): string[] {
   const ex = new Set(excludes);
   return specs.filter((s) => !ex.has(s));
 }

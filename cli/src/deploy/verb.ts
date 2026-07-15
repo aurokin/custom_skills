@@ -33,9 +33,12 @@ import {
 } from "./resolve";
 import { auditRepoSkillCoverage, loadCoverageManifest, makeGitEnumerator } from "./upstream";
 
-/** compute_skills_agents: $SKILLS_AGENTS split on whitespace, else the standard agent set. */
-const STANDARD_AGENTS = ["codex", "opencode", "gemini-cli", "github-copilot", "claude-code"];
-function defaultAgents(): string[] {
+/** compute_skills_agents (lib/agents.sh): $SKILLS_AGENTS split on whitespace, else the
+ *  standard agent set. Exported: the upstream-sync verb shares it, exactly as the two
+ *  bash scripts share lib/agents.sh. */
+export const STANDARD_AGENTS = ["codex", "opencode", "gemini-cli", "github-copilot", "claude-code"];
+export const HERMES_AGENT_ID = "hermes-agent";
+export function computeSkillsAgents(): string[] {
   const env = process.env.SKILLS_AGENTS;
   if (env && env.trim() !== "") return env.trim().split(/\s+/);
   return [...STANDARD_AGENTS];
@@ -219,7 +222,7 @@ export async function runDeploy(env: SkmEnv, opts: VerbOptions): Promise<VerbOut
   const agents =
     opts.agentsList !== undefined
       ? opts.agentsList.trim().split(/\s+/).filter((a) => a.length > 0)
-      : defaultAgents();
+      : computeSkillsAgents();
   if (agents.length === 0) throw new UsageError("No agents configured");
   // Every token is passed verbatim after `skills add -a`; a token starting with `-`
   // would be parsed as a skills-CLI option (e.g. `--agents "codex -s foo"` silently

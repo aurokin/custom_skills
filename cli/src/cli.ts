@@ -15,6 +15,7 @@ import { runRoot } from "./root";
 import { runStatus } from "./status";
 import { runReview } from "./review/verb";
 import { runDeploy } from "./deploy/verb";
+import { runUpstream } from "./upstream/verb";
 
 const VERBS: Record<string, VerbHandler> = {
   plan: runPlan,
@@ -26,6 +27,7 @@ const VERBS: Record<string, VerbHandler> = {
   adopt: runAdopt,
   root: runRoot,
   deploy: runDeploy,
+  upstream: runUpstream,
 };
 
 interface ParsedInvocation {
@@ -146,6 +148,8 @@ Usage:
   skm root    add|list|remove [<path>]     edit machine config roots
   skm deploy  <dir> [--family <n>]… [--all-families] [--agents "<a b>"] [--dry-run] [--yes] [--list-families]
                                            copy curated skill families into a project (ADR 0014)
+  skm upstream sync                        sync global upstream skills: remove stale, update, add missing
+                                           ($SKILLS_AGENTS / $SKILLS_BIN honored; ADR 0014)
 
 Exit codes: 0 clean · 1 error · 2 changes pending / drift`;
 
