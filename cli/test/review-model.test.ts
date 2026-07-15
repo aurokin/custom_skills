@@ -149,6 +149,28 @@ describe("review model", () => {
     expect(deployed?.status).toBe("modified");
   });
 
+  test("missing placements surface as drift instead of vanishing", async () => {
+    const root = makeRoot(sb, "public");
+    makeSkill(root.path, "gated-skill", {
+      frontmatter: { "disable-model-invocation": true },
+      body: "gated body",
+    });
+    writeMachineConfig(sb, { version: 1, roots: [root], agents: ["claude-code", "codex"] });
+    await runApply(sb.env, APPLY_OPTS);
+
+    // Delete one agent's rendered tree entirely: the placement must still be
+    // joined and reported missing, and the source variant must not read clean.
+    fs.rmSync(path.join(sb.home, ".claude", "skills", "gated-skill"), { recursive: true });
+
+    const model = buildReviewModel(sb.env, loadContext(sb.env));
+    const gated = model.units.find((u) => u.name === "gated-skill");
+    expect(gated?.placements.some((d) => d.status === "missing")).toBe(true);
+    expect(gated?.variants[0]?.deployed?.status).toBe("missing");
+    // The surviving agent's variant is still present and clean.
+    const codex = gated?.variants.find((v) => v.key === "codex");
+    expect(codex?.deployed?.status).toBe("clean");
+  });
+
   test("model is stable across runs (modulo clock)", async () => {
     const root = makeRoot(sb, "public");
     makeSkill(root.path, "plain-skill");

@@ -53,6 +53,9 @@ export interface ReviewUnit {
   note?: string;
   variants: ReviewVariant[];
   matrix?: ReviewMatrix;
+  /** EVERY desired placement joined against drift — including `missing` ones
+   *  with nothing on disk. Variants carry content; this carries accuracy. */
+  placements: ReviewDeployed[];
 }
 
 export interface ReviewInvEntry {
@@ -80,6 +83,22 @@ export interface ReviewModel {
 
 const DOC_CAP = 80_000;
 const DOC_FILE_LIST_CAP = 60;
+
+function isDir(p: string): boolean {
+  try {
+    return fs.statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function isFile(p: string): boolean {
+  try {
+    return fs.statSync(p).isFile();
+  } catch {
+    return false;
+  }
+}
 
 function listTree(root: string): ReviewFile[] {
   const out: ReviewFile[] = [];
@@ -168,14 +187,15 @@ export function buildReviewModel(env: SkmEnv, ctx: SkmContext): ReviewModel {
     const visibility = root?.visibility ?? "public";
     const group = visibility === "private" ? "Private skills" : "Public skills";
     const badges = [visibility, skill.gated ? "gated" : "symlinked"];
-    if (skill.source.note) badges.push("noted");
     const variants: ReviewVariant[] = [
       { key: "source", label: "Source", root: tilde(env, skill.source.path), files: listTree(skill.source.path) },
     ];
+    const placements: ReviewDeployed[] = [];
     for (const dp of placementsBySkill.get(skill.name) ?? []) {
       const p = dp.placement;
       const deployed = joinDrift(driftByPath, env, p.path);
-      if (skill.gated && p.kind !== "symlink" && fs.existsSync(p.path)) {
+      placements.push(deployed);
+      if (skill.gated && p.kind !== "symlink" && isDir(p.path)) {
         variants.push({
           key: String(p.agent),
           label: String(p.agent),
@@ -183,17 +203,19 @@ export function buildReviewModel(env: SkmEnv, ctx: SkmContext): ReviewModel {
           files: listTree(p.path),
           deployed,
         });
-      } else if (variants[0] && !variants[0].deployed) {
-        variants[0].deployed = deployed;
       }
+    }
+    // Source variant carries the aggregate: clean only when every placement is.
+    if (variants[0] && placements.length) {
+      variants[0].deployed = placements.find((d) => d.status !== "clean") ?? placements[0];
     }
     units.push({
       id: `${visibility}-${skill.name}`,
       group,
       name: skill.name,
       badges,
-      note: skill.source.note,
       variants,
+      placements,
     });
   }
 
@@ -212,6 +234,9 @@ export function buildReviewModel(env: SkmEnv, ctx: SkmContext): ReviewModel {
         };
       }
     }
+    const composedPlacements = (placementsBySkill.get(skill.name) ?? []).map((dp) =>
+      joinDrift(driftByPath, env, dp.placement.path),
+    );
     const matrixConsumers = consumers.map((c) => {
       const dp = (placementsBySkill.get(skill.name) ?? []).find((p) => String(p.placement.agent) === c);
       return dp ? { key: c, deployed: joinDrift(driftByPath, env, dp.placement.path) } : { key: c };
@@ -225,6 +250,7 @@ export function buildReviewModel(env: SkmEnv, ctx: SkmContext): ReviewModel {
         { key: "source", label: "Source", root: tilde(env, skill.source.path), files: listTree(skill.source.path) },
       ],
       matrix: { consumers: matrixConsumers, postures, sourcePosture: skill.posture, cells },
+      placements: composedPlacements,
     });
   }
 
@@ -233,17 +259,20 @@ export function buildReviewModel(env: SkmEnv, ctx: SkmContext): ReviewModel {
     const variants: ReviewVariant[] = [
       { key: "source", label: "Source", root: tilde(env, def.source.path), files: listTree(def.source.path) },
     ];
+    const defPlacements: ReviewDeployed[] = [];
     for (const dp of placementsBySkill.get(def.name) ?? []) {
       const p = dp.placement;
-      if (p.kind === "rendered-file" && fs.existsSync(p.path)) {
-        variants.push({
-          key: `${p.agent}`,
-          label: `${p.agent}`,
-          root: tilde(env, p.path),
-          files: [{ path: path.basename(p.path), content: fs.readFileSync(p.path, "utf8") }],
-          deployed: joinDrift(driftByPath, env, p.path),
-        });
-      }
+      const deployed = joinDrift(driftByPath, env, p.path);
+      defPlacements.push(deployed);
+      // Variant even when the render is absent or wrong-typed: the deployed
+      // chip must surface the drift; files stay empty when unreadable.
+      variants.push({
+        key: `${p.agent}`,
+        label: `${p.agent}`,
+        root: tilde(env, p.path),
+        files: isFile(p.path) ? [{ path: path.basename(p.path), content: fs.readFileSync(p.path, "utf8") }] : [],
+        deployed,
+      });
     }
     units.push({
       id: `agent-${def.name}`,
@@ -251,6 +280,7 @@ export function buildReviewModel(env: SkmEnv, ctx: SkmContext): ReviewModel {
       name: def.name,
       badges: ["agent", def.exportMode],
       variants,
+      placements: defPlacements,
     });
   }
 
