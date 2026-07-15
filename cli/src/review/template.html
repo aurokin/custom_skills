@@ -304,9 +304,11 @@
 const DATA = JSON.parse(document.getElementById("review-model").textContent);
 
 const $ = (s, r) => (r || document).querySelector(s);
-const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 const words = (s) => (s.match(/\S+/g) || []).length;
-const slug = (p) => "f-" + p.replace(/[^\w]/g, "-");
+// Injective: alnum passes through, everything else becomes _hex_ (so
+// references/a-b.md and references/a/b.md cannot share a section id).
+const slug = (p) => "f-" + p.replace(/[^A-Za-z0-9]/g, (c) => "_" + c.codePointAt(0).toString(16) + "_");
 const INV_ID = "__inventory__";
 
 const STATUS_LABEL = { clean: "on disk", missing: "missing", stale: "stale", modified: "modified", foreign: "foreign", unsafe: "unsafe" };
@@ -328,8 +330,18 @@ const unitById = (id) => DATA.units.find((x) => x.id === id);
 
 // ── posture line-diff (LCS), computed in-page from the two compiled cells.
 // Phase 3 (ADR 0013) moves this into the model; phase 2 keeps it here.
+const LCS_CELL_CAP = 2_500_000;
 function lineDiff(a, b) {
   const n = a.length, m = b.length;
+  if ((n + 1) * (m + 1) > LCS_CELL_CAP) {
+    // Bounded fallback for huge files: set membership instead of the
+    // quadratic LCS table. Approximate (order-blind), flagged as capped.
+    const inB = new Set(b), inA = new Set(a);
+    const exA = new Set();
+    for (let i = 0; i < n; i++) if (!inB.has(a[i])) exA.add(i);
+    const dropped = b.filter((l) => !inA.has(l));
+    return { exA, ghostsForA: dropped.length ? [{ after: n - 1, lines: dropped }] : [], capped: true };
+  }
   const dp = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
   for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--)
     dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
@@ -359,17 +371,17 @@ const toRanges = (set) => {
 };
 const diffCache = new Map();
 function cellDiff(u, consumer, posture, filePath) {
-  const key = `${u.id} ${consumer} ${posture} ${filePath}`;
+  const key = `${u.id}\u0000${consumer}\u0000${posture}\u0000${filePath}`;
   if (diffCache.has(key)) return diffCache.get(key);
   const mx = u.matrix;
   const otherP = otherPosture(mx, posture);
   const thisF = mx.cells[`${consumer}|${posture}`].files.find((f) => f.path === filePath);
   const otherCell = mx.cells[`${consumer}|${otherP}`];
   const otherF = otherCell ? otherCell.files.find((f) => f.path === filePath) : null;
-  const la = thisF.content.split("\n");
+  const la = thisF ? thisF.content.split("\n") : [];
   const lb = otherF ? otherF.content.split("\n") : [];
   const d = lineDiff(la, lb);
-  const res = { ex: toRanges(d.exA), ghosts: d.ghostsForA };
+  const res = { ex: toRanges(d.exA), ghosts: d.ghostsForA, capped: !!d.capped };
   diffCache.set(key, res);
   return res;
 }
@@ -686,7 +698,15 @@ function wireMatrixBar(u) {
 
 // ── unit rendering ──
 function currentFiles(u) {
-  if (u.matrix && cur.consumer !== "source") return u.matrix.cells[`${cur.consumer}|${cur.posture}`].files;
+  if (u.matrix && cur.consumer !== "source") {
+    // Union with the other posture so a file that exists only there still
+    // renders (empty, all-ghost) instead of silently disappearing.
+    const files = u.matrix.cells[`${cur.consumer}|${cur.posture}`].files;
+    const other = u.matrix.cells[`${cur.consumer}|${otherPosture(u.matrix, cur.posture)}`];
+    const have = new Set(files.map((f) => f.path));
+    const extra = other ? other.files.filter((f) => !have.has(f.path)).map((f) => ({ path: f.path, content: "", onlyOther: true })) : [];
+    return files.concat(extra).sort((a, b) => a.path.localeCompare(b.path));
+  }
   const v = u.matrix ? u.variants[0] : u.variants.find((x) => x.key === cur.variant) || u.variants[0];
   return v.files;
 }
@@ -745,11 +765,12 @@ function renderUnitBody(u) {
     ? files.map((f) => {
         let ann = null, chips = "";
         if (inCell) {
-          const { ex, ghosts } = cellDiff(u, cur.consumer, cur.posture, f.path);
+          const { ex, ghosts, capped } = cellDiff(u, cur.consumer, cur.posture, f.path);
           const exSet = new Set();
           for (const [start, len] of ex) for (let k = 0; k < len; k++) exSet.add(start + k);
           ann = { mode: "cell", posture: cur.posture, otherP: otherPosture(u.matrix, cur.posture), exSet, ghosts, ghostsOn: cur.ghosts };
-          if (exSet.size || ghosts.length) chips = `<span class="chip pdiff">differs by posture</span>`;
+          if (f.onlyOther) chips = `<span class="chip pdiff">only in ${esc(otherPosture(u.matrix, cur.posture))}</span>`;
+          else if (exSet.size || ghosts.length) chips = `<span class="chip pdiff">differs by posture${capped ? " (approx)" : ""}</span>`;
         } else if (inLens && /<!--\s*@posture/.test(f.content)) {
           ann = { mode: "lens", posture: cur.posture };
           chips = `<span class="chip pdiff">posture blocks</span>`;
