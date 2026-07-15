@@ -48,3 +48,30 @@ test("--agents-home with no operand is a usage error", () => {
   expect(() => parseArgs(["adopt", "custom-agents", "--agents-home"])).toThrow(/--agents-home requires/);
   expect(() => parseArgs(["adopt", "custom-agents", "--agents-home", "--json"])).toThrow(/--agents-home requires/);
 });
+
+test("deploy parses its repeatable and value flags", () => {
+  const { verb, opts } = parseArgs([
+    "deploy",
+    "/proj",
+    "--family",
+    "expo",
+    "--family",
+    "convex",
+    "--agents",
+    "claude-code codex",
+    "--dry-run",
+  ]);
+  expect(verb).toBe("deploy");
+  expect(opts.args).toEqual(["/proj"]);
+  expect(opts.families).toEqual(["expo", "convex"]);
+  expect(opts.agentsList).toBe("claude-code codex");
+  expect(opts.dryRun).toBe(true);
+});
+
+test("deploy-only flags are rejected on other verbs (no silent dry-run on apply)", () => {
+  // Regression: --dry-run must not leak to mutating verbs. It is a deploy-only flag,
+  // so on any other verb it falls through to the unknown-flag guard.
+  expect(() => parseArgs(["apply", "--dry-run"])).toThrow(/unknown flag: --dry-run/);
+  expect(() => parseArgs(["plan", "--family", "expo"])).toThrow(/unknown flag: --family/);
+  expect(() => parseArgs(["apply", "--all-families"])).toThrow(/unknown flag: --all-families/);
+});
