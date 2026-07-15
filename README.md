@@ -419,3 +419,7 @@ The one remaining shell test covers the `agents-md` fork sync:
 ```bash
 bash maintenance/test-agents-md.sh
 ```
+
+## License
+
+[MIT](LICENSE)
