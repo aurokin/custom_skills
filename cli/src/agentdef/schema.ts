@@ -208,6 +208,8 @@ export interface AgentDefinitionFields {
   instructions: string;
   sourceDir: string;
   export: string;
+  /** Optional authored editorial note for the review console (ADR 0013). */
+  reviewNote?: string;
   sandbox: string;
   modelStrategy: string;
   skills: string[];
@@ -228,6 +230,7 @@ export class AgentDefinition {
   readonly instructions: string;
   readonly sourceDir: string;
   readonly export: string;
+  readonly reviewNote?: string;
   readonly sandbox: string;
   readonly modelStrategy: string;
   readonly skills: string[];
@@ -247,6 +250,7 @@ export class AgentDefinition {
     this.instructions = fields.instructions;
     this.sourceDir = fields.sourceDir;
     this.export = fields.export;
+    this.reviewNote = fields.reviewNote;
     this.sandbox = fields.sandbox;
     this.modelStrategy = fields.modelStrategy;
     this.skills = fields.skills;
@@ -382,6 +386,8 @@ export function loadAgentDefinition(input: AgentDefinitionInput): AgentDefinitio
     throw new SchemaError(`Invalid export in ${path}: ${JSON.stringify(exportMode)} (allowed: ${allowed})`);
   }
 
+  const reviewNote = optionalStr(raw, "review-note", path);
+
   // defaults
   const defaultsRaw = optionalMapping(raw, "defaults", path);
   rejectUnknownKeys(defaultsRaw, ["sandbox", "skills", "model_strategy"], `Unknown defaults keys in ${path}`);
@@ -411,6 +417,7 @@ export function loadAgentDefinition(input: AgentDefinitionInput): AgentDefinitio
       "name",
       "description",
       "export",
+      "review-note",
       "defaults",
       "claude",
       "codex",
@@ -431,6 +438,7 @@ export function loadAgentDefinition(input: AgentDefinitionInput): AgentDefinitio
     instructions,
     sourceDir: input.sourceDir ?? "",
     export: exportMode,
+    reviewNote,
     sandbox,
     modelStrategy,
     skills,
