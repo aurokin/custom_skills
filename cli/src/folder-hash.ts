@@ -37,24 +37,27 @@ function sortKey(e: TreeEntry): Buffer {
 }
 
 /** Hash one directory level as a git tree object; undefined = empty (git tracks no empty dirs). */
-function hashTree(dir: string): Buffer | undefined {
+function hashTree(dir: string, nfcNames: boolean): Buffer | undefined {
   const entries: TreeEntry[] = [];
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
     if (e.name === ".git") continue; // never part of a git tree
+    // Decomposing filesystems (HFS+) hand back NFD names; git's
+    // core.precomposeUnicode records NFC. The caller picks the pass.
+    const name = nfcNames ? e.name.normalize("NFC") : e.name;
     const abs = path.join(dir, e.name);
     const st = fs.lstatSync(abs);
     if (st.isSymbolicLink()) {
       const target = fs.readlinkSync(abs);
-      entries.push({ mode: "120000", name: e.name, sha: sha1(`blob ${Buffer.byteLength(target)}\0`, target) });
+      entries.push({ mode: "120000", name, sha: sha1(`blob ${Buffer.byteLength(target)}\0`, target) });
     } else if (st.isDirectory()) {
-      const sha = hashTree(abs);
-      if (sha) entries.push({ mode: "40000", name: e.name, sha });
+      const sha = hashTree(abs, nfcNames);
+      if (sha) entries.push({ mode: "40000", name, sha });
     } else if (st.isFile()) {
       const content = fs.readFileSync(abs);
       // Git canonicalizes on the OWNER execute bit only (S_IXUSR): a file
       // that is merely group/other-executable indexes as 100644.
       const mode = (st.mode & 0o100) !== 0 ? "100755" : "100644";
-      entries.push({ mode, name: e.name, sha: sha1(`blob ${content.length}\0`, content) });
+      entries.push({ mode, name, sha: sha1(`blob ${content.length}\0`, content) });
     }
     // Sockets/FIFOs etc.: git cannot represent them; skip like git does.
   }
@@ -64,10 +67,11 @@ function hashTree(dir: string): Buffer | undefined {
   return sha1(`tree ${payload.length}\0`, payload);
 }
 
-/** Git tree-object SHA-1 of a directory's content, or undefined (empty/unreadable). */
-export function gitTreeHash(dir: string): string | undefined {
+/** Git tree-object SHA-1 of a directory's content, or undefined (empty/unreadable).
+ *  `nfcNames` precomposes filenames like git's core.precomposeUnicode. */
+export function gitTreeHash(dir: string, opts?: { nfcNames?: boolean }): string | undefined {
   try {
-    return hashTree(dir)?.toString("hex");
+    return hashTree(dir, opts?.nfcNames === true)?.toString("hex");
   } catch {
     return undefined;
   }
@@ -117,10 +121,21 @@ export function skillsCliFolderHash(dir: string): string | undefined {
 export type FolderHashVerdict = "match" | "mismatch" | "unverifiable";
 
 export function verifySkillFolderHash(dir: string, lockHash: string): FolderHashVerdict {
-  let computed: string | undefined;
-  if (/^[0-9a-f]{40}$/.test(lockHash)) computed = gitTreeHash(dir);
-  else if (/^[0-9a-f]{64}$/.test(lockHash)) computed = skillsCliFolderHash(dir);
-  else return "unverifiable"; // includes the CLI's empty-string "no hash" records
-  if (computed === undefined) return "unverifiable";
-  return computed === lockHash ? "match" : "mismatch";
+  if (/^[0-9a-f]{40}$/.test(lockHash)) {
+    const raw = gitTreeHash(dir);
+    if (raw === undefined) return "unverifiable";
+    if (raw === lockHash) return "match";
+    // A decomposing filesystem can return NFD names for an untouched install
+    // whose upstream tree is NFC; retry precomposed (git's precomposeUnicode)
+    // before claiming modification. Cannot turn a true match into a mismatch.
+    return gitTreeHash(dir, { nfcNames: true }) === lockHash ? "match" : "mismatch";
+  }
+  if (/^[0-9a-f]{64}$/.test(lockHash)) {
+    // The CLI computed this hash locally at install time on this same
+    // filesystem, so raw names already agree; no normalization pass.
+    const computed = skillsCliFolderHash(dir);
+    if (computed === undefined) return "unverifiable";
+    return computed === lockHash ? "match" : "mismatch";
+  }
+  return "unverifiable"; // includes the CLI's empty-string "no hash" records
 }

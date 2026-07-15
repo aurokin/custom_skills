@@ -74,6 +74,23 @@ describe("gitTreeHash", () => {
     expect(gitTreeHash(dir)).toBe("b1f73f0b3612cbe7a31f1f22deff31d6919993ea");
   });
 
+  test("NFD filenames verify against the NFC upstream tree via the precompose fallback", () => {
+    // Golden from real git (core.precomposeUnicode): a tree holding the NFC
+    // form of "cafe\u0301.md" with content "accented\n". A decomposing
+    // filesystem hands the file back with an NFD name; the fallback must
+    // still attest it.
+    const NFC_GOLDEN = "6e2c262ed81b1e63d32c85095c5747cd1160d517";
+    const nfdName = "cafe\u0301.md"; // explicitly decomposed, as HFS+ readdir returns it
+    const dir = path.join(base, "uni");
+    fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(dir, nfdName), "accented\n");
+    expect(gitTreeHash(dir, { nfcNames: true })).toBe(NFC_GOLDEN);
+    expect(verifySkillFolderHash(dir, NFC_GOLDEN)).toBe("match");
+    // Tampered content still fails through both passes.
+    fs.appendFileSync(path.join(dir, nfdName), "tampered\n");
+    expect(verifySkillFolderHash(dir, NFC_GOLDEN)).toBe("mismatch");
+  });
+
   test("content changes the hash; empty or missing dirs hash to undefined", () => {
     const dir = makeGoldenTree();
     fs.appendFileSync(path.join(dir, "a.txt"), "tampered\n");
