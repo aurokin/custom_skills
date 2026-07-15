@@ -13,11 +13,13 @@ import { runExplain } from "./explain";
 import { runPlan } from "./plan";
 import { runRoot } from "./root";
 import { runStatus } from "./status";
+import { runReview } from "./review/verb";
 
 const VERBS: Record<string, VerbHandler> = {
   plan: runPlan,
   apply: runApply,
   status: runStatus,
+  review: runReview,
   doctor: runDoctor,
   explain: runExplain,
   adopt: runAdopt,
@@ -91,6 +93,7 @@ Usage:
   skm apply   [--json] [--plan <f>] [--prune] [--yes]
   skm status  [--json]                     drift: missing|stale|modified|foreign|unsafe
   skm doctor  [--json] [--fix]             leaks, broken links, deny-guarantee checks
+  skm review  [--json]                     skill-surface review model (ADR 0013; HTML in phase 2)
   skm explain <skill> [--json]             source, scoping, placements, bleed
   skm adopt   custom-agents [--agents-home <dir>]  take ownership of manifest agent-def files
   skm root    add|list|remove [<path>]     edit machine config roots
