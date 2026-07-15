@@ -46,6 +46,18 @@ function hashTree(dir: string, nfcNames: boolean): Buffer | undefined {
     const name = nfcNames ? e.name.normalize("NFC") : e.name;
     const abs = path.join(dir, e.name);
     const st = fs.lstatSync(abs);
+    if (nfcNames && name !== e.name) {
+      // The precomposed spelling may claim only what the filesystem itself
+      // equates: on a normalization-insensitive FS (HFS+/APFS) the NFC path
+      // resolves to this same file; on a byte-preserving FS (ext4) it does
+      // not — there the NFD bytes are a real rename, and attesting the NFC
+      // tree would launder a modification. Abort the pass (throws → caller
+      // returns undefined → verdict stays mismatch).
+      const nfcSt = fs.lstatSync(path.join(dir, name)); // ENOENT aborts too
+      if (nfcSt.ino !== st.ino || nfcSt.dev !== st.dev) {
+        throw new Error("filesystem does not equate NFC/NFD spellings");
+      }
+    }
     if (st.isSymbolicLink()) {
       const target = fs.readlinkSync(abs);
       entries.push({ mode: "120000", name, sha: sha1(`blob ${Buffer.byteLength(target)}\0`, target) });
@@ -68,7 +80,9 @@ function hashTree(dir: string, nfcNames: boolean): Buffer | undefined {
 }
 
 /** Git tree-object SHA-1 of a directory's content, or undefined (empty/unreadable).
- *  `nfcNames` precomposes filenames like git's core.precomposeUnicode. */
+ *  `nfcNames` precomposes filenames like git's core.precomposeUnicode, but only
+ *  where the filesystem resolves both spellings to the same file (undefined
+ *  otherwise — a genuine NFD rename must not hash as its NFC tree). */
 export function gitTreeHash(dir: string, opts?: { nfcNames?: boolean }): string | undefined {
   try {
     return hashTree(dir, opts?.nfcNames === true)?.toString("hex");
@@ -127,7 +141,8 @@ export function verifySkillFolderHash(dir: string, lockHash: string): FolderHash
     if (raw === lockHash) return "match";
     // A decomposing filesystem can return NFD names for an untouched install
     // whose upstream tree is NFC; retry precomposed (git's precomposeUnicode)
-    // before claiming modification. Cannot turn a true match into a mismatch.
+    // before claiming modification. The pass self-aborts unless the FS equates
+    // the spellings, so a real NFD rename can never launder into a match.
     return gitTreeHash(dir, { nfcNames: true }) === lockHash ? "match" : "mismatch";
   }
   if (/^[0-9a-f]{64}$/.test(lockHash)) {
