@@ -152,7 +152,8 @@ function listTree(root: string): ReviewFile[] {
 }
 
 function tilde(env: SkmEnv, p: string): string {
-  return p.startsWith(env.home) ? `~${p.slice(env.home.length)}` : p;
+  // Component boundary: /Users/x-backup must not abbreviate under HOME /Users/x.
+  return p === env.home || p.startsWith(env.home + path.sep) ? `~${p.slice(env.home.length)}` : p;
 }
 
 /** Join a placement against the drift findings: absence of a finding = clean. */

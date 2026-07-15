@@ -45,6 +45,9 @@ describe("loadCatalogSpecs", () => {
     const specs = loadCatalogSpecs([r]);
     expect(specs.specs).toHaveLength(1);
     expect(specs.bySkillName["thermos"]).toBe("cursor/plugins/thermos");
+    // Lookup is fed arbitrary directory names: inherited object keys must miss.
+    expect(specs.bySkillName["constructor"]).toBeUndefined();
+    expect(specs.bySkillName["toString"]).toBeUndefined();
   });
 
   test("loads families with their spec files", () => {

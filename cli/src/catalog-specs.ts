@@ -77,7 +77,9 @@ export function loadCatalogSpecs(roots: Root[]): CatalogSpecs {
       }
     }
   }
-  const bySkillName: Record<string, string> = {};
+  // Null prototype: queried with arbitrary inventory dir names, so inherited
+  // keys ("constructor", "toString") must not read as catalog entries.
+  const bySkillName: Record<string, string> = Object.create(null);
   for (const s of specs) {
     if (s.skill) bySkillName[s.skill] = s.repo;
   }
