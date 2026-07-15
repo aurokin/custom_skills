@@ -376,7 +376,7 @@ function isGatedFrontmatter(fm: unknown): boolean {
   );
 }
 
-function parseFrontmatter(content: string): unknown {
+export function parseFrontmatter(content: string): unknown {
   const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(content);
   if (!m) return undefined;
   try {

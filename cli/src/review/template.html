@@ -82,6 +82,8 @@
   .unit-btn.off .n { color: var(--ink-3); }
   .unit-btn.off .meta .off-tag { text-transform: uppercase; letter-spacing: .06em; }
   .side-foot { padding: 10px 16px; border-top: 1px solid var(--line); font-family: var(--mono); font-size: 10px; color: var(--ink-3); }
+  .side-legend { display: flex; flex-wrap: wrap; gap: 5px 11px; padding: 2px 16px 12px; font-size: 10px; color: var(--ink-3); }
+  .side-legend span { display: inline-flex; align-items: center; gap: 5px; }
 
   /* ── main ── */
   .main { min-width: 0; display: flex; flex-direction: column; min-height: 0; }
@@ -293,6 +295,13 @@
     </div>
     <div class="tree" id="tree"></div>
     <div class="side-foot" id="totals"></div>
+    <div class="side-legend" aria-label="Dot legend">
+      <span><span class="dot plain"></span>symlinked</span>
+      <span><span class="dot gated"></span>gated</span>
+      <span><span class="dot composed"></span>rendered</span>
+      <span><span class="dot drift"></span>drift</span>
+      <span><span class="dot off"></span>disabled</span>
+    </div>
   </nav>
   <main class="main">
     <div class="main-head" id="head"></div>
@@ -347,6 +356,13 @@ function dotClass(u) {
   if (u.badges.includes("composed") || u.badges.includes("agent")) return "composed";
   return "plain";
 }
+function dotTitle(u) {
+  if (u.disabled) return "disabled on this host (export: none override)";
+  if (hasDrift(u)) return "a deployed placement drifts from what skm would render";
+  if (u.badges.includes("gated")) return "gated skill — rendered per-agent into gate-honoring dirs";
+  if (u.badges.includes("composed") || u.badges.includes("agent")) return "rendered artifact (composed skill or agent definition)";
+  return "plain skill — symlinked into the shared skill dirs";
+}
 function unitMatches(u, q) {
   if (!q) return true;
   q = q.toLowerCase();
@@ -369,7 +385,7 @@ function renderTree() {
   const invBtn = document.createElement("button");
   invBtn.className = "unit-btn" + (cur.unit === INV_ID ? " active" : "");
   const invCount = DATA.inventory.reduce((n, d) => n + d.entries.length, 0);
-  invBtn.innerHTML = `<span class="dot inv"></span><span class="n">installed right now</span><span class="meta">${invCount}</span>`;
+  invBtn.innerHTML = `<span class="dot inv" title="inventory — every skill installed right now"></span><span class="n">installed right now</span><span class="meta">${invCount}</span>`;
   invBtn.onclick = () => { cur = { ...cur, unit: INV_ID }; renderAll(); };
   tree.appendChild(invBtn);
 
@@ -388,7 +404,7 @@ function renderTree() {
       if (u.disabled) b.title = "disabled on this machine (export: none override)";
       else if (hasDrift(u)) b.title = "a deployed placement drifts from what skm would render";
       const meta = u.disabled ? `<span class="off-tag">off</span>` : `${nFiles}f${nVar > 1 ? " · " + nVar + "v" : ""}`;
-      b.innerHTML = `<span class="dot ${dotClass(u)}"></span><span class="n">${esc(u.name)}</span>` +
+      b.innerHTML = `<span class="dot ${dotClass(u)}" title="${esc(dotTitle(u))}"></span><span class="n">${esc(u.name)}</span>` +
         `<span class="meta">${meta}</span>`;
       b.onclick = () => {
         const posture = u.matrix ? u.matrix.sourcePosture : cur.posture;

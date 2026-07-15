@@ -11,6 +11,7 @@ import { computeDesiredPlacements, type DesiredPlacement } from "../placements";
 import { renderComposedSkill, type RenderedComposedTree } from "../composed/render";
 import { PROVIDER_POOL_DIR } from "../composed/source";
 import { isAgentDefDir } from "../agentdef/source";
+import { parseFrontmatter } from "../resolve";
 import { lineDiff } from "./linediff";
 import { computeDrift } from "../status";
 import type { DriftClass, Posture } from "../types";
@@ -187,6 +188,20 @@ export function diffCellFiles(thisTree: RenderedComposedTree, otherTree: Rendere
   return files;
 }
 
+/** Authored `review-note` from a SKILL.md's frontmatter (ADR 0013), or undefined. */
+function skillReviewNote(skillDir: string): string | undefined {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(path.join(skillDir, "SKILL.md"), "utf8");
+  } catch {
+    return undefined;
+  }
+  const fm = parseFrontmatter(raw);
+  if (typeof fm !== "object" || fm === null || Array.isArray(fm)) return undefined;
+  const note = (fm as Record<string, unknown>)["review-note"];
+  return typeof note === "string" && note.trim() ? note.trim() : undefined;
+}
+
 function tilde(env: SkmEnv, p: string): string {
   // Component boundary: /Users/x-backup must not abbreviate under HOME /Users/x.
   return p === env.home || p.startsWith(env.home + path.sep) ? `~${p.slice(env.home.length)}` : p;
@@ -310,6 +325,7 @@ export function buildReviewModel(env: SkmEnv, ctx: SkmContext): ReviewModel {
       group,
       name: skill.name,
       badges,
+      note: skillReviewNote(skill.source.path),
       variants,
       placements,
     });
@@ -413,14 +429,17 @@ export function buildReviewModel(env: SkmEnv, ctx: SkmContext): ReviewModel {
         deployed,
       });
     }
+    // The generated disable note wins; an authored review-note appends after it.
+    const disableNote = disabled
+      ? `Disabled on ${env.machineName}: root '${def.source.root}' overrides with export: none. Nothing is rendered to any harness here.`
+      : undefined;
+    const note = [disableNote, def.def.reviewNote].filter(Boolean).join("\n\n") || undefined;
     units.push({
       id: `agent-${def.name}`,
       group: "Agent definitions",
       name: def.name,
       badges: disabled ? ["agent", "disabled"] : ["agent", def.exportMode],
-      note: disabled
-        ? `Disabled on ${env.machineName}: root '${def.source.root}' overrides with export: none. Nothing is rendered to any harness here.`
-        : undefined,
+      note,
       variants,
       placements: defPlacements,
       disabled: disabled || undefined,

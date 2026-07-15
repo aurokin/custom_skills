@@ -337,6 +337,40 @@ describe("review model", () => {
     expect(pool?.placements).toEqual([]);
   });
 
+  test("review-note frontmatter surfaces on the native-skill unit", async () => {
+    const root = makeRoot(sb, "public");
+    makeSkill(root.path, "noted-skill", {
+      frontmatter: { "review-note": "Byte-for-byte fork of the shipped skill." },
+      body: "noted body",
+    });
+    writeMachineConfig(sb, { version: 1, roots: [root], agents: ["claude-code"] });
+    await runApply(sb.env, APPLY_OPTS);
+
+    const model = buildReviewModel(sb.env, loadContext(sb.env));
+    const noted = model.units.find((u) => u.name === "noted-skill");
+    expect(noted?.note).toContain("Byte-for-byte fork of the shipped skill.");
+  });
+
+  test("disabled agent def combines the generated disable note with the authored review-note", async () => {
+    const pub = makeRoot(sb, "public");
+    makeAgentDef(pub.path, "helper-agent", { instructions: "The real instructions.\n" });
+    // The winning (override) stub carries the authored note explaining the disable.
+    const local = makeRoot(sb, "local", "private");
+    makeAgentDef(local.path, "helper-agent", {
+      agentYaml: { export: "none", "review-note": "Retired in favor of the composed orchestrate skill." },
+      instructions: "Host-local disable stub.\n",
+    });
+    writeMachineConfig(sb, { version: 1, roots: [pub, local], agents: ["claude-code"] });
+    await runApply(sb.env, APPLY_OPTS);
+
+    const model = buildReviewModel(sb.env, loadContext(sb.env));
+    const unit = model.units.find((u) => u.name === "helper-agent");
+    expect(unit?.disabled).toBe(true);
+    // Generated disable note wins; the authored note follows on a new paragraph.
+    expect(unit?.note).toContain("export: none");
+    expect(unit?.note).toContain("Retired in favor of the composed orchestrate skill.");
+  });
+
   test("model is stable across runs (modulo clock)", async () => {
     const root = makeRoot(sb, "public");
     makeSkill(root.path, "plain-skill");
