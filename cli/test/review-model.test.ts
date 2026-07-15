@@ -210,6 +210,11 @@ describe("review model", () => {
     fs.writeFileSync(path.join(outside, "inner.md"), "linked content\n");
     fs.symlinkSync(outside, path.join(dir, "linked"));
     fs.symlinkSync(path.join(sb.home, "does-not-exist"), path.join(dir, "dangling"));
+    // Symlink cycle back to the skill root: the walk must terminate.
+    fs.symlinkSync(dir, path.join(dir, "loop"));
+    // Binary and oversized files must become markers, not raw payload.
+    fs.writeFileSync(path.join(dir, "asset.bin"), Buffer.from([0x89, 0x50, 0x00, 0x47]));
+    fs.writeFileSync(path.join(dir, "huge.md"), `start ${"x".repeat(90_000)}`);
     writeMachineConfig(sb, { version: 1, roots: [root], agents: ["claude-code"] });
     await runApply(sb.env, APPLY_OPTS);
 
@@ -217,6 +222,12 @@ describe("review model", () => {
     const files = model.units.find((u) => u.name === "plain-skill")?.variants[0]?.files ?? [];
     expect(files.some((f) => f.path === "linked/inner.md")).toBe(true);
     expect(files.some((f) => f.path.startsWith("dangling"))).toBe(false);
+    expect(files.filter((f) => f.path === "SKILL.md")).toHaveLength(1);
+    expect(files.some((f) => f.path.startsWith("loop/"))).toBe(false);
+    expect(files.find((f) => f.path === "asset.bin")?.content).toContain("[binary file");
+    const huge = files.find((f) => f.path === "huge.md");
+    expect(huge?.content).toContain("[truncated: 90006 bytes total]");
+    expect((huge?.content.length ?? 0)).toBeLessThan(90_000);
   });
 
   test("model is stable across runs (modulo clock)", async () => {

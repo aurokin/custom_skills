@@ -83,6 +83,7 @@ export interface ReviewModel {
 
 const DOC_CAP = 80_000;
 const DOC_FILE_LIST_CAP = 60;
+const FILE_CAP = 80_000;
 
 function isDir(p: string): boolean {
   try {
@@ -100,16 +101,46 @@ function isFile(p: string): boolean {
   }
 }
 
+/** Read at most FILE_CAP bytes; binary content becomes a marker, not mojibake. */
+function readCapped(abs: string, size: number): string {
+  const buf = Buffer.alloc(Math.min(size, FILE_CAP));
+  const fd = fs.openSync(abs, "r");
+  try {
+    fs.readSync(fd, buf, 0, buf.length, 0);
+  } finally {
+    fs.closeSync(fd);
+  }
+  if (buf.includes(0)) return `… [binary file, ${size} bytes omitted]`;
+  const text = buf.toString("utf8");
+  return size > FILE_CAP ? `${text}\n… [truncated: ${size} bytes total]` : text;
+}
+
 function listTree(root: string): ReviewFile[] {
   const out: ReviewFile[] = [];
+  const visited = new Set<string>();
   const walk = (dir: string, rel: string) => {
+    // Stat follows symlinks so linked directories walk instead of hitting
+    // readFileSync; the visited set (real paths) breaks symlink cycles, and
+    // broken links are skipped, not fatal.
+    let real: string;
+    try {
+      real = fs.realpathSync(dir);
+    } catch {
+      return;
+    }
+    if (visited.has(real)) return;
+    visited.add(real);
     for (const e of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
       const abs = path.join(dir, e.name);
       const r = rel ? `${rel}/${e.name}` : e.name;
-      // Classify by stat (follows symlinks) so a symlinked directory walks
-      // instead of hitting readFileSync; broken links are skipped, not fatal.
-      if (isDir(abs)) walk(abs, r);
-      else if (isFile(abs)) out.push({ path: r, content: fs.readFileSync(abs, "utf8") });
+      let st: fs.Stats;
+      try {
+        st = fs.statSync(abs);
+      } catch {
+        continue;
+      }
+      if (st.isDirectory()) walk(abs, r);
+      else if (st.isFile()) out.push({ path: r, content: readCapped(abs, st.size) });
     }
   };
   walk(root, "");
