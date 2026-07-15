@@ -26,6 +26,9 @@ placement, scoping, composed-skill rendering, and drift detection. See
 # Place local skills (symlinks + gated per-agent renders) — skm owns this
 cd cli && bun src/cli.ts plan && bun src/cli.ts apply
 
+# Build the HTML review console (ADR 0013; writes $XDG_STATE_HOME/skills-manager/review.html)
+cd cli && bun src/cli.ts review
+
 # Refresh the forked agents-md skill from upstream
 bash maintenance/sync-agents-md.sh
 
