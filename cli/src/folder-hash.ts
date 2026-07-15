@@ -51,7 +51,9 @@ function hashTree(dir: string): Buffer | undefined {
       if (sha) entries.push({ mode: "40000", name: e.name, sha });
     } else if (st.isFile()) {
       const content = fs.readFileSync(abs);
-      const mode = (st.mode & 0o111) !== 0 ? "100755" : "100644";
+      // Git canonicalizes on the OWNER execute bit only (S_IXUSR): a file
+      // that is merely group/other-executable indexes as 100644.
+      const mode = (st.mode & 0o100) !== 0 ? "100755" : "100644";
       entries.push({ mode, name: e.name, sha: sha1(`blob ${content.length}\0`, content) });
     }
     // Sockets/FIFOs etc.: git cannot represent them; skip like git does.

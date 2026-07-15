@@ -62,6 +62,18 @@ describe("gitTreeHash", () => {
     expect(gitTreeHash(dir)).toBe("e257dfe67b9c22dc34f6a624c386142f45a04db6");
   });
 
+  test("executable mode keys on the owner bit only, like git", () => {
+    // Goldens from real git: chmod 655 (group/other exec, no owner) indexes
+    // as 100644 — identical tree to a plain 644 file; chmod 744 is 100755.
+    const dir = path.join(base, "modes");
+    fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(dir, "a.txt"), "hello\n");
+    fs.chmodSync(path.join(dir, "a.txt"), 0o655);
+    expect(gitTreeHash(dir)).toBe("2e81171448eb9f2ee3821e3d447aa6b2fe3ddba1");
+    fs.chmodSync(path.join(dir, "a.txt"), 0o744);
+    expect(gitTreeHash(dir)).toBe("b1f73f0b3612cbe7a31f1f22deff31d6919993ea");
+  });
+
   test("content changes the hash; empty or missing dirs hash to undefined", () => {
     const dir = makeGoldenTree();
     fs.appendFileSync(path.join(dir, "a.txt"), "tampered\n");
