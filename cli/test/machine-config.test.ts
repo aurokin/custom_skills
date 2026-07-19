@@ -149,3 +149,27 @@ describe("assertRootsExist", () => {
     expect(() => assertRootsExist(config)).toThrow(/registered root 'gone' missing/);
   });
 });
+
+describe("agent-list edge shapes", () => {
+  test("a JSON null agents list reads as absent (defaults apply)", () => {
+    sandbox = makeSandbox();
+    writeMachineConfig(sandbox, {
+      version: 1,
+      roots: [{ name: "public", path: "~/x", visibility: "public" }],
+      agents: null,
+    } as unknown as MachineConfig);
+    const config = loadMachineConfig(sandbox.env, reg());
+    expect(config.agents).toBeUndefined();
+    expect(enabledAgents(config, reg())).toEqual(defaultEnabledAgents(reg()));
+  });
+
+  test("a non-array agents value is a config error", () => {
+    sandbox = makeSandbox();
+    writeMachineConfig(sandbox, {
+      version: 1,
+      roots: [{ name: "public", path: "~/x", visibility: "public" }],
+      agents: "claude-code",
+    } as unknown as MachineConfig);
+    expect(() => loadMachineConfig(sandbox!.env, reg())).toThrow(/must be a list of agent ids/);
+  });
+});

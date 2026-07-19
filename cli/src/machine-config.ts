@@ -36,17 +36,25 @@ export function normalizeConfig(env: SkmEnv, raw: MachineConfig, reg: Registry):
   if (!Array.isArray(raw.roots)) {
     throw new ConfigError("machine config missing `roots` array");
   }
-  if (raw.agents !== undefined && raw.optInAgents !== undefined) {
+  // JSON `null` reads as absent (the pre-ADR-0016 `??` behavior); a present list
+  // must be an array of known agent ids.
+  const agentsRaw = raw.agents ?? undefined;
+  const optInRaw = raw.optInAgents ?? undefined;
+  if (agentsRaw !== undefined && optInRaw !== undefined) {
     throw new ConfigError(
       "machine config declares both `agents` and `optInAgents`; they are mutually exclusive " +
         "(`agents` is the exact enabled set, `optInAgents` adds to the default set)",
     );
   }
   for (const [field, list] of [
-    ["agents", raw.agents],
-    ["optInAgents", raw.optInAgents],
+    ["agents", agentsRaw],
+    ["optInAgents", optInRaw],
   ] as const) {
-    for (const id of list ?? []) {
+    if (list === undefined) continue;
+    if (!Array.isArray(list)) {
+      throw new ConfigError(`machine config \`${field}\` must be a list of agent ids`);
+    }
+    for (const id of list) {
       if (!reg.agents[id]) {
         throw new ConfigError(`machine config \`${field}\` names unknown agent '${id}'`);
       }
@@ -58,8 +66,8 @@ export function normalizeConfig(env: SkmEnv, raw: MachineConfig, reg: Registry):
     roots,
     privateOriginAllowlist: raw.privateOriginAllowlist ?? [],
   };
-  if (raw.agents !== undefined) config.agents = raw.agents;
-  if (raw.optInAgents !== undefined) config.optInAgents = raw.optInAgents;
+  if (agentsRaw !== undefined) config.agents = agentsRaw;
+  if (optInRaw !== undefined) config.optInAgents = optInRaw;
   return config;
 }
 
