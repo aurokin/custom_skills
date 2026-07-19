@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "researched": "2026-07-15",
+  "researched": "2026-07-19",
   "note": "Global-scope agent capability registry. See docs/skills-manager-design.md §4 for the research behind every entry. reads[] is precedence-ordered where the agent defines precedence; maybeReads[] entries are unconfirmed reads treated as reads for deny guarantees.",
   "directories": {
     "shared": { "path": "~/.agents/skills" },
@@ -14,7 +14,8 @@
     "grok": { "path": "~/.grok/skills" },
     "factory": { "path": "~/.factory/skills" },
     "antigravity": { "path": "~/.gemini/config/skills", "note": "Antigravity global-skills root, empirically read by the CLI variant (agy v1.1.2, 2026-07-15) and documented for the Antigravity 2.0 app; other variants read variant-specific extras (legacy ~/.gemini/skills, CLI ~/.gemini/antigravity-cli/skills). Evidence: antigravity.google/docs/skills, docs/cli/plugins, docs/cli/gcli-migration." },
-    "hermes": { "path": "~/.hermes/skills" }
+    "hermes": { "path": "~/.hermes/skills" },
+    "super-claude": { "path": "~/.super-claude/skills", "note": "Config home of the super-claude CLAUDE_CONFIG_DIR variant of the claude binary. Read only by that variant (canary probes 2026-07-19)." }
   },
   "agents": {
     "claude-code": {
@@ -38,6 +39,31 @@
         "probedVersion": "2.1.207",
         "probedOn": "2026-07-11",
         "note": "Known upstream bugs can also block the user half of a gated skill — fails safe (never model-exposed)."
+      }
+    },
+    "super-claude": {
+      "skillsSupport": "supported",
+      "reads": ["super-claude"],
+      "maybeReads": [],
+      "ownDir": "super-claude",
+      "dialect": "claude",
+      "symlinks": "followed",
+      "firstParty": true,
+      "optIn": true,
+      "unscopedOwnDir": true,
+      "probeCli": "claude",
+      "note": "Data-only variant of the claude binary launched with CLAUDE_CONFIG_DIR=~/.super-claude (ADR 0016). Enable per host via machine config optInAgents. Keep this entry generic: nothing model- or proxy-specific belongs here.",
+      "evidence": "Live canary probes 2026-07-19 (claude 2.1.215): a symlinked dummy in ~/.super-claude/skills loads under the variant; dummies placed only in ~/.claude/skills or ~/.agents/skills do NOT appear under it, and a variant-only dummy does not appear under plain claude — reads are exactly the own dir, no inheritance in either direction. Symlink followed (the own-dir dummy was a symlink).",
+      "agentDefSupport": "supported",
+      "agentDefDir": "~/.super-claude/agents",
+      "agentDefDialect": "claude",
+      "agentDefEvidence": "Same loader as claude-code (userDir = getClaudeConfigHomeDir()/agents, honors CLAUDE_CONFIG_DIR). Live probe 2026-07-19 (claude 2.1.215): a dummy .md in ~/.super-claude/agents appears in the variant's subagent list.",
+      "skillInvocation": {
+        "userInvocation": "slash",
+        "gate": "frontmatter",
+        "evidence": "Live probe 2026-07-19 under CLAUDE_CONFIG_DIR=~/.super-claude: a disable-model-invocation dummy was absent from the model's skill list while /name slash invocation returned the skill's marker. Same binary as claude-code — re-probe both entries together on version bumps.",
+        "probedVersion": "2.1.215",
+        "probedOn": "2026-07-19"
       }
     },
     "codex": {
