@@ -319,7 +319,7 @@ function gateVersionDrift(env: SkmEnv, config: MachineConfig, registry: Registry
   for (const agentId of [...agents].sort()) {
     const si = registry.agents[agentId]?.skillInvocation;
     if (!si?.probedVersion) continue;
-    const installed = env.agentVersionProbe(agentId);
+    const installed = env.agentVersionProbe(agentId, registry.agents[agentId]?.probeCli);
     if (installed === undefined || installed === si.probedVersion) continue;
     findings.push({
       category: "gate-version-drift",

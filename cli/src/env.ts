@@ -40,8 +40,10 @@ export interface SkmEnv {
    * doctor finding c): given an agent id, return the version string the agent's CLI
    * reports, or undefined when the binary is missing / output is unparseable. Injected
    * so tests decide versions without spawning real binaries. Absent → drift check skips.
+   * `probeCli` (from the agent's registry entry) overrides the built-in id→binary map —
+   * the data-driven path for agent variants that share a first-party binary (ADR 0016).
    */
-  agentVersionProbe?: (agentId: string) => string | undefined;
+  agentVersionProbe?: (agentId: string, probeCli?: string) => string | undefined;
 }
 
 /** Production environment: real home, process env, wall-clock, real hostname. */
@@ -54,15 +56,13 @@ export function realEnv(): SkmEnv {
     machineName: os.hostname(),
     clock: { now: () => new Date().toISOString() },
     tpromptProbe: () => binaryOnPath("tprompt"),
-    agentVersionProbe: (agentId) => probeAgentVersion(agentId),
+    agentVersionProbe: (agentId, probeCli) => probeAgentVersion(agentId, probeCli),
   };
 }
 
 /** Registry agent id → CLI binary name for the gate-version probe (gate-honoring agents). */
 const AGENT_CLI: Record<string, string> = {
   "claude-code": "claude",
-  // CLAUDE_CONFIG_DIR variant of the claude binary — same executable, same probe.
-  "super-claude": "claude",
   codex: "codex",
   "github-copilot": "copilot",
   cursor: "cursor-agent",
@@ -73,12 +73,14 @@ const AGENT_CLI: Record<string, string> = {
 
 /**
  * Best-effort installed-CLI version for one agent: run `<cli> --version` and pull the
- * first dotted-version token out of stdout. Returns undefined when the binary is
- * unknown/missing or the output has no parseable version — the caller then skips the
- * drift check silently (ADR 0011). Kept cheap: a single short-timeout subprocess.
+ * first dotted-version token out of stdout. `probeCli` (registry data, ADR 0016)
+ * overrides the built-in map so agent variants sharing a first-party binary need no
+ * engine edit. Returns undefined when the binary is unknown/missing or the output has
+ * no parseable version — the caller then skips the drift check silently (ADR 0011).
+ * Kept cheap: a single short-timeout subprocess.
  */
-function probeAgentVersion(agentId: string): string | undefined {
-  const bin = AGENT_CLI[agentId];
+function probeAgentVersion(agentId: string, probeCli?: string): string | undefined {
+  const bin = probeCli ?? AGENT_CLI[agentId];
   if (!bin || !binaryOnPath(bin)) return undefined;
   let out: ReturnType<typeof spawnSync>;
   try {

@@ -171,6 +171,28 @@ export function loadComposedSkill(input: ComposedSkillInput): {
     consumerFiles[id] = splitConsumerSections(text);
   }
 
+  // A consumer whose excludeProviders empties EVERY dimension chain renders no
+  // routing table; the render's placeholder points at the consumer sections, so
+  // that guidance must actually exist (a consumers/<id>.md gate or appendix) —
+  // otherwise the skill would deploy with no route and no replacement advice.
+  // Self-only emptiness (no exclusions) stays a designed silent outcome (ADR 0010).
+  for (const [id, consumer] of Object.entries(consumers)) {
+    const excluded = new Set(consumer.excludeProviders ?? []);
+    if (excluded.size === 0) continue;
+    const self = registry.agents[id]?.ownDir;
+    const anyRoute = dimensions.some((dim) =>
+      dim.candidates.some((c) => c.provider !== self && !excluded.has(c.provider)),
+    );
+    if (anyRoute) continue;
+    const cf = consumerFiles[id];
+    if (!cf?.gate && !cf?.appendix) {
+      throw new ComposedSkillError(
+        `Consumer '${id}' excludes every routable provider but has no consumers/${id}.md guidance ` +
+          `(gate or appendix section) to replace the routing table (${path})`,
+      );
+    }
+  }
+
   const warnings = unusedProviderWarnings(name, localProviders, dimensions);
 
   const skill: DesiredComposedSkill = {

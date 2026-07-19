@@ -80,8 +80,12 @@ All five become registry/skill-source **data**:
 - The composed selection-fingerprint canonicalization changed (adds
   `excludeProviders`), so `desiredStateHash` differs across this upgrade;
   placements and actions are byte-identical (guarded by tests).
-- The gate-version probe maps `super-claude` to the `claude` binary
-  (same executable).
+- The gate-version drift probe is registry-driven for variants: an agent entry's
+  `probeCli` names the binary to probe (a `CLAUDE_CONFIG_DIR` variant sets
+  `"probeCli": "claude"`), overriding the engine's built-in id→binary map. A
+  consumer whose exclusions empty every dimension chain must ship a
+  `consumers/<id>.md` gate or appendix (load error otherwise) so the rendered
+  placeholder's pointer always resolves.
 - Two registry entries for one binary means two `probedVersion` bumps per
   re-probe — accepted at one variant; `variantOf` inheritance was considered
   and deferred until a third variant exists.

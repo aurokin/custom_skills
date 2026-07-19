@@ -576,7 +576,9 @@ function exclusionInput(excludeProviders: string[] | undefined): DesiredComposed
       codex: providerText("codex", "codex", "gpt-5.5"),
       grok: providerText("grok", "grok", "grok-4.5"),
     },
-    consumerFiles: {},
+    consumerFiles: {
+      "claude-code": "<!-- @section appendix -->\nRoute natively; never shell out.\n",
+    },
     registry,
   };
   return loadComposedSkill(input).skill;
@@ -597,6 +599,8 @@ describe("excludeProviders render semantics", () => {
     const md = tree["SKILL.md"]!;
     expect(md).toContain("No CLI routes for this consumer");
     expect(md).not.toContain("| Dimension | When | Route |");
+    // The consumer guidance the placeholder points at is present (load-enforced).
+    expect(md).toContain("Route natively; never shell out.");
     // No references ship, but the anti-recursion CLI list still names every declared CLI.
     expect(Object.keys(tree)).toEqual(["SKILL.md"]);
     expect(md).toContain("Body claude, codex, grok");

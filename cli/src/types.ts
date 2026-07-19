@@ -88,6 +88,12 @@ export interface AgentCapability {
   /** Excluded from the default enabled set; machines enable via `agents`/`optInAgents`. */
   optIn?: boolean;
   /**
+   * CLI binary name for the gate-version drift probe, overriding the engine's
+   * built-in id→binary map — required for agent variants sharing a first-party
+   * binary under a new id (e.g. a CLAUDE_CONFIG_DIR profile probes `claude`).
+   */
+  probeCli?: string;
+  /**
    * When enabled, this agent receives unscoped skills in its own dir (it reads
    * neither the shared nor the claude dir). Replaces the solver's former hardcoded
    * enumeration; grok deliberately lacks it (reached only via maybeReads).

@@ -18,6 +18,8 @@ refresh evidence when an agent changes its discovery paths or invocation model.
   `agents`/`optInAgents` (hermes, agent variants).
 - `unscopedOwnDir`: when enabled, the agent receives unscoped skills in its own
   dir (agents that read neither the shared nor the claude dir; ADR 0016).
+- `probeCli`: binary name for the gate-version drift probe, overriding the
+  engine's built-in map (variants sharing a first-party binary; ADR 0016).
 - `agentDefDir`, `agentDefDialect`, `agentDefVia`: agent-definition delivery.
 - `skillInvocation`: user invocation, model-invocation gate, probe version/date,
   and evidence used by gated placement and drift warnings.

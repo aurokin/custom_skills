@@ -477,10 +477,10 @@ describe("excludeProviders (per-consumer exclusion)", () => {
   test("valid entries parse onto the consumer", () => {
     const { skill } = loadComposedSkill(
       withYaml((y) => {
-        y.consumers["claude-code"].excludeProviders = ["codex", "grok"];
+        y.consumers["claude-code"].excludeProviders = ["codex"];
       }),
     );
-    expect(skill.consumers["claude-code"]!.excludeProviders).toEqual(["codex", "grok"]);
+    expect(skill.consumers["claude-code"]!.excludeProviders).toEqual(["codex"]);
     expect(skill.consumers.codex!.excludeProviders).toBeUndefined();
   });
 
@@ -532,5 +532,36 @@ describe("excludeProviders (per-consumer exclusion)", () => {
         }),
       ),
     ).toThrow(/non-empty strings/);
+  });
+});
+
+describe("all-routes-excluded consumers require guidance", () => {
+  test("excluding every routable provider without a consumer file is a load error", () => {
+    expect(() =>
+      loadComposedSkill(
+        withYaml((y) => {
+          // claude-code self=claude; excluding codex+grok empties every chain.
+          y.consumers["claude-code"].excludeProviders = ["codex", "grok"];
+        }),
+      ),
+    ).toThrow(/excludes every routable provider but has no consumers\/claude-code\.md guidance/);
+  });
+
+  test("the same exclusions with an appendix section load cleanly", () => {
+    const input = withYaml((y) => {
+      y.consumers["claude-code"].excludeProviders = ["codex", "grok"];
+    });
+    input.consumerFiles = { "claude-code": "<!-- @section appendix -->\nNative routing advice.\n" };
+    const { skill } = loadComposedSkill(input);
+    expect(skill.consumers["claude-code"]!.excludeProviders).toEqual(["codex", "grok"]);
+  });
+
+  test("exclusions that leave at least one route need no consumer file", () => {
+    const { skill } = loadComposedSkill(
+      withYaml((y) => {
+        y.consumers["claude-code"].excludeProviders = ["codex"]; // grok still routes
+      }),
+    );
+    expect(skill.consumers["claude-code"]!.excludeProviders).toEqual(["codex"]);
   });
 });

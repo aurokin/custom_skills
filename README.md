@@ -397,9 +397,10 @@ this is pure data — no engine code changes:
    skills dir plus an agent entry — same `dialect` as the base program,
    `firstParty: true` (it renders per-dialect frontmatter), `optIn: true` (a
    variant's existence is per-machine; it must not auto-enable fleet-wide),
-   `unscopedOwnDir: true` if it should receive unscoped skills, its own
-   `agentDefDir`, and probe-backed evidence strings. Keep the entry generic:
-   nothing machine- or proxy-specific, no model catalogs.
+   `unscopedOwnDir: true` if it should receive unscoped skills, `probeCli`
+   naming the shared binary (so the gate-version drift probe works without an
+   engine edit), its own `agentDefDir`, and probe-backed evidence strings. Keep
+   the entry generic: nothing machine- or proxy-specific, no model catalogs.
 3. **Machine opt-in** (`~/.config/skills-manager/config.json`): add the variant
    to `optInAgents` on the hosts that run it. Allow lists, gated placement, and
    agent-def fan-out all intersect with enablement, so shared overlays naming

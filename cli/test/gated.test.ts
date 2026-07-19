@@ -1041,3 +1041,32 @@ describe("doctor gated findings", () => {
     expect(diagnose(env, c.config, c.registry, c.desired, c.state).some((x) => x.category === "gate-version-drift")).toBe(false);
   });
 });
+
+describe("gate-version drift probe binary (probeCli)", () => {
+  test("doctor passes the agent's registry probeCli through to the version probe", () => {
+    sandbox = makeSandbox();
+    const root = makeRoot(sandbox, "public");
+    makeSkill(root.path, "fleet-update", { frontmatter: { "disable-model-invocation": true } });
+    writeMachineConfig(sandbox, { version: 1, roots: [root], agents: ["claude-code"] });
+    const seen: Array<[string, string | undefined]> = [];
+    const env: SkmEnv = {
+      ...sandbox.env,
+      agentVersionProbe: (id, cli) => {
+        seen.push([id, cli]);
+        return undefined;
+      },
+    };
+    const c = loadContext(env);
+    // A variant sharing the claude binary declares probeCli in registry data
+    // (ADR 0016); the doctor's drift check must hand it to the injected probe.
+    const registry = {
+      ...c.registry,
+      agents: {
+        ...c.registry.agents,
+        "claude-code": { ...c.registry.agents["claude-code"]!, probeCli: "claude-variant-bin" },
+      },
+    };
+    diagnose(env, c.config, registry, c.desired, c.state);
+    expect(seen).toContainEqual(["claude-code", "claude-variant-bin"]);
+  });
+});
