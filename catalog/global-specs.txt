@@ -10,4 +10,7 @@ vercel-labs/agent-browser@agent-browser
 vercel-labs/agent-skills@web-design-guidelines
 vercel-labs/skills@find-skills
 blader/humanizer@humanizer
+# grill-me is gated upstream but lands in the shared root, where no gate is
+# enforced — doctor errors on this every pass. Auro 2026-07-19: exposure
+# accepted knowingly; the standing gated-leak ERROR for grill-me is expected.
 mattpocock/skills@grill-me
