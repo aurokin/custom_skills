@@ -132,3 +132,113 @@ test("suggests a kill switch when a scoped skill bleeds onto an agent that has o
   expect(suggestion).toBeDefined();
   expect(suggestion?.message).toContain("OPENCODE_DISABLE_CLAUDE_CODE_SKILLS");
 });
+
+// ── Kill-switch env awareness + accepted shared-root exposures ──────────────
+
+test("active kill-switch env suppresses the env suggestion and live exposure warn", async () => {
+  const root = makeRoot(sb, "public");
+  makeSkill(root.path, "claude-only");
+  makeAgentScopes(root.path, { "claude-only": { agents: { allow: ["claude-code"] } } });
+  makeSkill(root.path, "gated-x", { frontmatter: { "disable-model-invocation": true } });
+  writeMachineConfig(sb, { version: 1, roots: [root], agents: ["claude-code", "opencode"] });
+  await runApply(sb.env, opts());
+
+  // Baseline: with no env var, both the bleed suggestion and the live gated
+  // exposure warn fire (opencode reads the claude dir and ignores the gate).
+  const base = loadContext(sb.env);
+  const baseFindings = diagnose(sb.env, base.config, base.registry, base.desired, loadState(sb.env));
+  expect(baseFindings.some((f) => f.category === "env-suggestion")).toBe(true);
+  expect(baseFindings.some((f) => f.category === "gated-leak" && f.severity === "warn" && f.skill === "gated-x")).toBe(true);
+
+  // With the opencode kill switch active in the environment, both are satisfied
+  // mitigations, not findings.
+  sb.env.envVar = (name) => (name === "OPENCODE_DISABLE_CLAUDE_CODE_SKILLS" ? "1" : undefined);
+  const c = loadContext(sb.env);
+  const findings = diagnose(sb.env, c.config, c.registry, c.desired, loadState(sb.env));
+  expect(findings.some((f) => f.category === "env-suggestion")).toBe(false);
+  expect(findings.some((f) => f.category === "gated-leak" && f.severity === "warn" && f.skill === "gated-x")).toBe(false);
+});
+
+test("an empty-string kill-switch env var does not count as active", async () => {
+  const root = makeRoot(sb, "public");
+  makeSkill(root.path, "gated-x", { frontmatter: { "disable-model-invocation": true } });
+  writeMachineConfig(sb, { version: 1, roots: [root], agents: ["claude-code", "opencode"] });
+  await runApply(sb.env, opts());
+
+  sb.env.envVar = (name) => (name === "OPENCODE_DISABLE_CLAUDE_CODE_SKILLS" ? "" : undefined);
+  const c = loadContext(sb.env);
+  const findings = diagnose(sb.env, c.config, c.registry, c.desired, loadState(sb.env));
+  expect(findings.some((f) => f.category === "gated-leak" && f.severity === "warn" && f.skill === "gated-x")).toBe(true);
+});
+
+test("acceptedGatedExposures downgrades the shared-root gated ERROR to info", () => {
+  const root = makeRoot(sb, "public");
+  writeMachineConfig(sb, {
+    version: 1,
+    roots: [root],
+    agents: ["claude-code", "codex"],
+    acceptedGatedExposures: ["grill-me"],
+  });
+
+  // A foreign (upstream-placed) gated skill sitting in the shared root.
+  const c = loadContext(sb.env);
+  const sharedDir = path.join(dirPath(sb.env, c.registry, "shared"), "grill-me");
+  fs.mkdirSync(sharedDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(sharedDir, "SKILL.md"),
+    "---\nname: grill-me\ndescription: gated upstream skill\ndisable-model-invocation: true\n---\nbody\n",
+  );
+
+  const findings = diagnose(sb.env, c.config, c.registry, c.desired, loadState(sb.env));
+  const forSkill = findings.filter((f) => f.category === "gated-leak" && f.skill === "grill-me");
+  expect(forSkill.length).toBe(1);
+  expect(forSkill[0]!.severity).toBe("info");
+  expect(forSkill[0]!.message).toContain("accepted exposure");
+
+  // A different unaccepted gated skill in the shared root still errors.
+  const otherDir = path.join(dirPath(sb.env, c.registry, "shared"), "other-gated");
+  fs.mkdirSync(otherDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(otherDir, "SKILL.md"),
+    "---\nname: other-gated\ndescription: gated\ndisable-model-invocation: true\n---\nbody\n",
+  );
+  const findings2 = diagnose(sb.env, c.config, c.registry, c.desired, loadState(sb.env));
+  expect(findings2.some((f) => f.category === "gated-leak" && f.skill === "other-gated" && f.severity === "error")).toBe(true);
+});
+
+test("acceptedGatedExposures downgrades the no-gate-own-dir gated ERROR to info", () => {
+  const root = makeRoot(sb, "public");
+  writeMachineConfig(sb, {
+    version: 1,
+    roots: [root],
+    agents: ["claude-code", "hermes"],
+    acceptedGatedExposures: ["grill-me"],
+  });
+
+  // The same accepted skill placed (unmanaged) in a no-gate agent's OWN dir —
+  // hermes has gate "none", so without the acceptance this is the error branch.
+  const c = loadContext(sb.env);
+  const hermesDir = path.join(dirPath(sb.env, c.registry, "hermes"), "grill-me");
+  fs.mkdirSync(hermesDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(hermesDir, "SKILL.md"),
+    "---\nname: grill-me\ndescription: gated upstream skill\ndisable-model-invocation: true\n---\nbody\n",
+  );
+
+  const findings = diagnose(sb.env, c.config, c.registry, c.desired, loadState(sb.env));
+  const forSkill = findings.filter((f) => f.category === "gated-leak" && f.skill === "grill-me");
+  expect(forSkill.length).toBe(1);
+  expect(forSkill[0]!.severity).toBe("info");
+  expect(forSkill[0]!.message).toContain("accepted exposure");
+  expect(forSkill[0]!.message).toContain("hermes");
+
+  // An unaccepted gated skill in the same dir still errors.
+  const otherDir = path.join(dirPath(sb.env, c.registry, "hermes"), "other-gated");
+  fs.mkdirSync(otherDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(otherDir, "SKILL.md"),
+    "---\nname: other-gated\ndescription: gated\ndisable-model-invocation: true\n---\nbody\n",
+  );
+  const findings2 = diagnose(sb.env, c.config, c.registry, c.desired, loadState(sb.env));
+  expect(findings2.some((f) => f.category === "gated-leak" && f.skill === "other-gated" && f.severity === "error")).toBe(true);
+});

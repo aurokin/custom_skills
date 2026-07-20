@@ -60,6 +60,22 @@ export function normalizeConfig(env: SkmEnv, raw: MachineConfig, reg: Registry):
       }
     }
   }
+  const acceptedRaw = raw.acceptedGatedExposures ?? undefined;
+  if (acceptedRaw !== undefined) {
+    if (!Array.isArray(acceptedRaw)) {
+      throw new ConfigError("machine config `acceptedGatedExposures` must be a list of skill names");
+    }
+    const seen = new Set<string>();
+    for (const name of acceptedRaw) {
+      if (typeof name !== "string" || name.trim() === "") {
+        throw new ConfigError("machine config `acceptedGatedExposures` entries must be non-empty strings");
+      }
+      if (seen.has(name)) {
+        throw new ConfigError(`machine config \`acceptedGatedExposures\` lists '${name}' twice`);
+      }
+      seen.add(name);
+    }
+  }
   const roots: Root[] = raw.roots.map((r) => ({ ...r, path: expandTilde(env, r.path) }));
   const config: MachineConfig = {
     version: raw.version,
@@ -68,6 +84,7 @@ export function normalizeConfig(env: SkmEnv, raw: MachineConfig, reg: Registry):
   };
   if (agentsRaw !== undefined) config.agents = agentsRaw;
   if (optInRaw !== undefined) config.optInAgents = optInRaw;
+  if (acceptedRaw !== undefined) config.acceptedGatedExposures = acceptedRaw;
   return config;
 }
 

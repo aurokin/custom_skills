@@ -44,6 +44,12 @@ export interface SkmEnv {
    * the data-driven path for agent variants that share a first-party binary (ADR 0016).
    */
   agentVersionProbe?: (agentId: string, probeCli?: string) => string | undefined;
+  /**
+   * Ambient environment-variable reader for host-state checks (doctor's
+   * kill-switch awareness). Injected so tests control the environment; empty
+   * string reads as unset. Absent → no variable is treated as set.
+   */
+  envVar?: (name: string) => string | undefined;
 }
 
 /** Production environment: real home, process env, wall-clock, real hostname. */
@@ -57,6 +63,7 @@ export function realEnv(): SkmEnv {
     clock: { now: () => new Date().toISOString() },
     tpromptProbe: () => binaryOnPath("tprompt"),
     agentVersionProbe: (agentId, probeCli) => probeAgentVersion(agentId, probeCli),
+    envVar: (name) => process.env[name] || undefined,
   };
 }
 

@@ -98,6 +98,33 @@ describe("loadMachineConfig", () => {
     expect(enabled).toEqual([...defaultEnabledAgents(reg()), "hermes"]);
   });
 
+  test("acceptedGatedExposures round-trips and validates", () => {
+    sandbox = makeSandbox();
+    writeMachineConfig(sandbox, {
+      version: 1,
+      roots: [{ name: "public", path: "~/x", visibility: "public" }],
+      acceptedGatedExposures: ["grill-me"],
+    });
+    expect(loadMachineConfig(sandbox.env, reg()).acceptedGatedExposures).toEqual(["grill-me"]);
+  });
+
+  test("acceptedGatedExposures rejects non-list, empty entries, and duplicates", () => {
+    for (const [bad, msg] of [
+      ["grill-me", /must be a list/],
+      [[""], /non-empty strings/],
+      [["grill-me", "grill-me"], /twice/],
+    ] as const) {
+      sandbox?.cleanup();
+      sandbox = makeSandbox();
+      writeMachineConfig(sandbox, {
+        version: 1,
+        roots: [{ name: "public", path: "~/x", visibility: "public" }],
+        acceptedGatedExposures: bad as unknown as string[],
+      });
+      expect(() => loadMachineConfig(sandbox!.env, reg())).toThrow(msg);
+    }
+  });
+
   test("agents + optInAgents together is a config error", () => {
     sandbox = makeSandbox();
     writeMachineConfig(sandbox, {

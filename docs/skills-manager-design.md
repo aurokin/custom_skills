@@ -269,6 +269,17 @@ so shared overlays naming a disabled agent are inert on that host. Agent
 `CLAUDE_CONFIG_DIR` profile) are plain registry entries registered per the
 README's "Registering an Agent Variant" recipe — render channels, unscoped
 own-dir placement, and enablement all derive from registry data.
+`acceptedGatedExposures` names skills whose gated exposure is knowingly
+accepted (typically upstream-catalog skills the catalog places in the shared
+root or in a no-gate agent's own dir): doctor downgrades their gated-leak
+ERROR — in both the shared-root and no-gate-own-dir branches — to an info so a
+new finding stands out. Managed skills opting a no-gate agent in keep the
+per-skill `gating.permissive` route; the machine-config list covers unmanaged
+(upstream-placed) trees that route cannot reach. Doctor is also kill-switch aware: a reader whose registry
+kill switch (e.g. opencode's `OPENCODE_DISABLE_CLAUDE_CODE_SKILLS`) is set in
+the live environment is treated as already hidden — its per-reader exposure
+warns and env suggestions are suppressed. Doctor only; plan output stays
+environment-independent.
 
 A registered root that is missing on disk **aborts desired-state verbs** such
 as `plan`, `apply`, and `status` (never treated as "delete its skills").

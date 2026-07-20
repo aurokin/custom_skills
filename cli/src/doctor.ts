@@ -165,7 +165,7 @@ export function diagnose(
   //    on disk in a shared root (finding a), or in a no-gate agent's own dir without a
   //    permissive override (finding b) — either exposes it to the model invocation the
   //    gate exists to prevent.
-  findings.push(...gatedPlacementLeaks(env, registry, desired));
+  findings.push(...gatedPlacementLeaks(env, config, registry, desired));
 
   // 7b. Gated-exposure advisory: a LIVE gated placement whose dir currently has
   //     readers that do not enforce the gate and are not permissive-acknowledged.
@@ -178,6 +178,18 @@ export function diagnose(
   findings.push(...gateVersionDrift(env, config, registry, desired));
 
   return findings;
+}
+
+/**
+ * True when one of the agent's registry kill switches is set (non-empty) in the
+ * live environment: the user already hides foreign-dir skills from that agent, so
+ * per-reader exposure advisories and env suggestions are satisfied, not findings.
+ * Today's only kill-switch agent is opencode, whose switches both cover its
+ * foreign-dir reads; revisit if a switch ever gains dir-specific semantics.
+ */
+function killSwitchActive(env: SkmEnv, registry: Registry, agentId: string): boolean {
+  const switches = registry.agents[agentId]?.killSwitches ?? [];
+  return switches.some((sw) => !!env.envVar?.(sw));
 }
 
 /**
@@ -216,7 +228,12 @@ function gatedLiveExposure(
       const dirId = dirByPath.get(path.resolve(path.dirname(abs)));
       if (!dirId) continue;
       const permissive = permissiveByName.get(artifact.name) ?? new Set<string>();
-      const exposed = gatedExposureOf(registry, dirId, sp.agent, permissive);
+      // A reader whose registry kill switch is active in the live environment is
+      // already hidden from this dir — satisfied mitigation, not exposure. Doctor
+      // only (host diagnosis is env-aware); plan warnings stay deterministic.
+      const exposed = gatedExposureOf(registry, dirId, sp.agent, permissive).filter(
+        (r) => !killSwitchActive(env, registry, r),
+      );
       if (exposed.length === 0) continue;
       findings.push({
         category: "gated-leak",
@@ -242,7 +259,8 @@ function gatedLiveExposure(
  * user-invoked-only is model-exposed there. Owned, correctly-gated placements (an
  * agent whose own gate honors the frontmatter) are fine and pass silently.
  */
-function gatedPlacementLeaks(env: SkmEnv, registry: Registry, desired: DesiredState): Finding[] {
+function gatedPlacementLeaks(env: SkmEnv, config: MachineConfig, registry: Registry, desired: DesiredState): Finding[] {
+  const accepted = new Set(config.acceptedGatedExposures ?? []);
   const permissiveByName = new Map<string, Set<string>>();
   for (const s of desired.skills) {
     if (s.gated) permissiveByName.set(s.name, new Set(s.gating?.permissive ?? []));
@@ -257,14 +275,27 @@ function gatedPlacementLeaks(env: SkmEnv, registry: Registry, desired: DesiredSt
     for (const entry of entries) {
       if (!isGatedOnDisk(entry)) continue;
       if (dirId === "shared") {
-        findings.push({
-          category: "gated-leak",
-          severity: "error",
-          skill: entry.name,
-          path: entry.path,
-          message: `gated skill '${entry.name}' is placed in the shared root '${dirId}', where every agent reads it and the gate is not enforced`,
-          fixable: false,
-        });
+        if (accepted.has(entry.name)) {
+          // The user recorded this exposure as knowingly accepted (machine config
+          // acceptedGatedExposures) — keep it visible, but not as an error.
+          findings.push({
+            category: "gated-leak",
+            severity: "info",
+            skill: entry.name,
+            path: entry.path,
+            message: `gated skill '${entry.name}' in the shared root '${dirId}' is a recorded accepted exposure (acceptedGatedExposures)`,
+            fixable: false,
+          });
+        } else {
+          findings.push({
+            category: "gated-leak",
+            severity: "error",
+            skill: entry.name,
+            path: entry.path,
+            message: `gated skill '${entry.name}' is placed in the shared root '${dirId}', where every agent reads it and the gate is not enforced`,
+            fixable: false,
+          });
+        }
         continue;
       }
       const owner = ownerByDir.get(dirId);
@@ -289,6 +320,19 @@ function gatedPlacementLeaks(env: SkmEnv, registry: Registry, desired: DesiredSt
         continue;
       }
       if (permissiveByName.get(entry.name)?.has(owner)) continue; // explicit prose-gated opt-in
+      if (accepted.has(entry.name)) {
+        // Same recorded acceptance as the shared-root branch: the exposure is the
+        // user's knowing decision (machine config acceptedGatedExposures).
+        findings.push({
+          category: "gated-leak",
+          severity: "info",
+          skill: entry.name,
+          path: entry.path,
+          message: `gated skill '${entry.name}' in no-gate agent '${owner}' dir '${dirId}' is a recorded accepted exposure (acceptedGatedExposures)`,
+          fixable: false,
+        });
+        continue;
+      }
       findings.push({
         category: "gated-leak",
         severity: "error",
@@ -598,6 +642,7 @@ function killSwitchSuggestions(
     for (const reader of b.readers) {
       const agent = registry.agents[reader];
       if (!agent?.killSwitches?.length) continue;
+      if (killSwitchActive(env, registry, reader)) continue; // suggestion already taken
       const sw = agent.killSwitches[0]!;
       const key = `${b.skill}:${reader}`;
       if (seen.has(key)) continue;

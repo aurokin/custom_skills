@@ -155,6 +155,13 @@ export interface MachineConfig {
   optInAgents?: string[];
   /** git origin remotes into whose worktrees private artifacts may be placed. Default []. */
   privateOriginAllowlist?: string[];
+  /**
+   * Skill names whose gated exposure the user knowingly accepts (e.g. an
+   * upstream-catalog skill the catalog places in `~/.agents/skills` or a
+   * no-gate agent's own dir). Doctor downgrades their gated-leak ERROR
+   * (shared root or no-gate own dir) to an info.
+   */
+  acceptedGatedExposures?: string[];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
